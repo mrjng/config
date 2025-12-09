@@ -1,0 +1,7 @@
+# Replace ls with eza
+alias ls="eza"
+alias ll="eza -lah"
+alias la="eza -a"
+alias lt="eza -aT -L1 --color=always --group-directories-first --icons"
+alias lt2="eza -aT -L2 --color=always --group-directories-first --icons"
+alias lt3="eza -aT -L3 --color=always --group-directories-first --icons"

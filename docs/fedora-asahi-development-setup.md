@@ -13,6 +13,20 @@ This document records the reproducible setup of a Fedora Asahi development envir
 
 A configuration that parses successfully is not considered physically verified.
 
+Current phase status:
+
+| Phase | State | Evidence or next condition |
+|---|---|---|
+| Baseline and audit | completed | System, shortcuts, and legacy configuration recorded |
+| Fedora shell packages | completed | Exact RPM versions and plugin paths recorded below |
+| Repository-only Kitty and Zsh pass | applied | Proposed files exist on `feat/fedora-asahi-dev-env`; validation is recorded below |
+| Isolated Kitty and Bare Zsh test | completed, user-verified | Proposed profiles and listed interactive behavior passed Phase 6 |
+| Starship, Zellij, Nerd Font, Neovim | deferred | No active configuration or installation in this pass |
+| Symlink deployment | deferred | Requires explicit approval, target inspection, and backups |
+| Terminal bell policy | deferred | Bell behavior was not selected during the isolated test |
+| macOS runtime behavior | unverified | The proposed macOS profile has not been run on macOS |
+| Login-shell change | deferred | Bash remains the account shell |
+
 ## 1. Goals
 
 - Build a Kitty, Zellij, Zsh, and Starship-based environment on Fedora Asahi.
@@ -33,6 +47,11 @@ A configuration that parses successfully is not considered physically verified.
 | Shell | Zsh 5.9 installed; Bash remains the account shell | installed and verified |
 | Git | 2.55.0 | installed and verified |
 | ripgrep | 15.2.0 | installed |
+| fzf | 0.74.2 | installed and verified from RPM |
+| zoxide | 0.9.8 | installed and verified from RPM |
+| eza | 0.23.5 | installed and verified from RPM |
+| Zsh autosuggestions | 0.7.1 | installed and source path verified |
+| Zsh syntax highlighting | 0.8.0 | installed and source path verified |
 | Input method | Fcitx5 Hangul, toggled with `Ctrl+Space` | user-verified |
 | Apple function keys | `hid_apple.fnmode=2` | applied |
 
@@ -74,6 +93,50 @@ ripgrep was installed as a weak dependency. The following command paths were ver
 ```
 
 `/usr/bin/zsh` is present in `/etc/shells`.
+
+### Fedora shell packages
+
+The Fedora shell-package phase is completed. These exact packages are
+installed:
+
+```text
+zsh-autosuggestions-0.7.1-4.fc44.noarch
+zsh-syntax-highlighting-0.8.0-7.fc44.noarch
+fzf-0.74.2-1.fc44.aarch64
+zoxide-0.9.8-2.fc44.aarch64
+eza-0.23.5-1.fc44.aarch64
+```
+
+Confirmed plugin source paths:
+
+```text
+/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+```
+
+`rpm -ql fzf` confirmed `/usr/share/fzf/shell/key-bindings.zsh` and
+`/usr/share/zsh/site-functions/_fzf`. Fedora's package does not install a Zsh
+`completion.zsh`; native `compinit` discovers the packaged `_fzf` completion,
+while the key-binding file is sourced only when readable.
+
+Reproduce the package and path checks with:
+
+```bash
+rpm -q \
+  zsh-autosuggestions \
+  zsh-syntax-highlighting \
+  fzf \
+  zoxide \
+  eza
+
+rpm -ql zsh-autosuggestions | rg 'zsh-autosuggestions\.zsh$'
+rpm -ql zsh-syntax-highlighting | rg 'zsh-syntax-highlighting\.zsh$'
+rpm -ql fzf | rg '/(key-bindings\.zsh|_fzf)$'
+```
+
+Stop if an expected file is absent or unreadable. Do not replace a missing
+Fedora file with a remote script; update the guarded repository path only after
+the installed package layout has been inspected.
 
 ### Dotfiles repository
 
@@ -224,9 +287,9 @@ Costs and limitations:
 - Starship adds a separate binary dependency.
 - Enabling too many modules can make the prompt wide or slow.
 
-## 7. Target repository layout
+## 7. Repository layout
 
-Use explicit symlinks and a small bootstrap script at the current repository scale. Reconsider GNU Stow if the repository grows into many independent configuration packages.
+The first repository-only pass creates this proposed, undeployed configuration:
 
 ```text
 README.md
@@ -234,12 +297,10 @@ AGENTS.md
 docs/
   fedora-asahi-development-setup.md
 kitty/
-  kitty.conf
+  kitty.conf                 # Fedora entry point
   common.conf
   linux.conf
-  macos.conf
-  themes/
-    catppuccin-mocha.conf
+  macos.conf                 # standalone macOS entry point
 zsh/
   .zshrc
   conf.d/
@@ -249,17 +310,21 @@ zsh/
     interactive.zsh
     linux.zsh
     macos.zsh
-starship/
-  starship.toml
-zellij/
-  config.kdl
-  layouts/
-    development.kdl
-scripts/
-  bootstrap
 ```
 
-Do not delete `kitty/work`, `zsh/work`, or `kitty/kitty.macos.conf` until the replacement configuration has been used and verified.
+`kitty/common.conf` temporarily reuses the platform-neutral
+`kitty/work/current-theme.conf`. A new theme, Starship configuration, Zellij
+configuration and layouts, Nerd Font assets, Neovim configuration, and a
+bootstrap script are deferred. None should be created merely to fill out a
+planned directory tree.
+
+If deployment is later approved, use explicit symlinks and a small bootstrap
+script at the current repository scale. Reconsider GNU Stow if the repository
+grows into many independent configuration packages.
+
+Do not delete or modify `kitty/work`, `zsh/work`, or
+`kitty/kitty.macos.conf`; they remain legacy references until the replacement
+has been physically verified.
 
 ## 8. Migration plan
 
@@ -407,37 +472,11 @@ Both are intentionally excluded from Git. Confirm that the canonical English
 document is tracked, then move these two untracked artifacts outside the
 repository rather than deleting them without inspection.
 
-### Phase 3 - Install Fedora-packaged shell dependencies (`next`)
+### Phase 3 - Install Fedora-packaged shell dependencies (`completed`)
 
-First confirm the tracked document and the two untracked artifacts:
-
-```bash
-cd ~/src/config
-git ls-files docs
-git status --short --branch
-```
-
-Expected tracked document:
-
-```text
-docs/fedora-asahi-development-setup.md
-```
-
-If that file is present, preserve the untracked duplicate and audit outside the
-repository:
-
-```bash
-mkdir -p ~/Documents/asahi-setup-notes
-mv -n -v docs/SETUP.md docs/fedora-asahi-dotfiles-audit.md \
-  ~/Documents/asahi-setup-notes/
-git status --short --branch
-```
-
-Stop if either source file is absent, either destination file already exists,
-or the tracked canonical document is missing. Resolve the exact paths rather
-than forcing an overwrite.
-
-Install the five approved Fedora packages. Keep Neovim separate:
+The five approved packages were installed before the first repository-only
+implementation pass. Neovim remained separate. The reproducible installation
+command was:
 
 ```bash
 sudo dnf install \
@@ -448,24 +487,17 @@ sudo dnf install \
   eza
 ```
 
-Verify commands, package versions, and the Zsh plugin source paths:
+The exact installed RPMs and plugin paths are recorded under **Completed work**.
+Verification must show all five RPMs, readable plugin files, and commands for
+`fzf`, `zoxide`, and `eza`.
 
-```bash
-command -v fzf zoxide eza
+Stop if the transaction proposes removing packages, replacing Fedora packages
+with third-party builds, or adding Neovim, Starship, or Zellij. Review a new
+transaction separately instead of expanding this phase.
 
-rpm -q \
-  zsh-autosuggestions \
-  zsh-syntax-highlighting \
-  fzf \
-  zoxide \
-  eza
-
-rpm -ql zsh-autosuggestions | rg 'zsh-autosuggestions\.zsh$'
-rpm -ql zsh-syntax-highlighting | rg 'zsh-syntax-highlighting\.zsh$'
-```
-
-Rollback: record the packages added by this transaction. Do not remove any
-package that existed before this setup.
+Rollback: use the recorded package-manager transaction and remove only packages
+that transaction added. Never remove a package that existed before the setup or
+is now required by another package.
 
 ### Phase 4 - Decide external binaries and the Nerd Font (`planned`)
 
@@ -498,47 +530,124 @@ files, destination, update procedure, and rollback command have been reviewed.
 Select and install the Nerd Font in the same phase so prompt glyphs can be
 tested immediately.
 
-### Phase 5 - Refactor inside the repository only (`planned`)
+### Phase 5 - Refactor inside the repository only (`applied`)
 
-- Create a dedicated Git branch.
-- Keep this setup record current; retain the audit report outside Git.
-- Extract only active Kitty settings into concise files.
-- Separate shared, Linux, and macOS settings.
-- Remove Kitty pane bindings so Zellij owns panes, tabs, and sessions.
-- Implement native Zsh completion and guarded plugin loading.
-- Add draft Starship and Zellij configurations.
-- Preserve the existing files as legacy reference.
+The first pass on `feat/fedora-asahi-dev-env` does the following:
 
-Do not create home-directory symlinks or run `chsh` in this phase.
+- Adds repository working rules in `AGENTS.md`.
+- Creates concise shared, Fedora/Wayland, and macOS Kitty files.
+- Keeps Kitty's default `Ctrl+Shift+C/V` and adds no pane or tab mappings.
+- Creates bare Zsh configuration with native completion and Emacs line editing.
+- Guards Fedora plugins, fzf key bindings, zoxide, eza, and the future Starship
+  initialization point so the shell remains usable when optional tools are absent.
+- Sources syntax highlighting last.
+- Preserves all legacy files unchanged.
+- Leaves Starship, Zellij, Nerd Font, Neovim, deployment, bell policy, and the
+  login shell deferred.
 
-Initial validation:
+No home-directory links, package operations, external downloads, or login-shell
+changes belong in this phase.
+
+Run repository validation from the repository root:
 
 ```bash
-zsh -n ~/src/config/zsh/.zshrc
-git -C ~/src/config diff --check
-git -C ~/src/config status --short
+# Every Zsh file, including preserved legacy references, must parse.
+while IFS= read -r zsh_file; do
+  zsh -n "$zsh_file" || exit 1
+done < <(find zsh -type f -print | sort)
+
+# Kitty 0.47.1 must parse the Fedora entry point without warnings.
+kitty +runpy '
+from kitty.config import load_config
+path = "kitty/kitty.conf"
+bad_lines = []
+load_config(path, accumulate_bad_lines=bad_lines)
+print(f"bad_lines={len(bad_lines)}")
+raise SystemExit(bool(bad_lines))
+' 2>&1
+
+# These checks should print no matches.
+rg -n '/Users|/opt/homebrew' \
+  kitty/kitty.conf kitty/common.conf kitty/linux.conf
+
+rg -n -i \
+  'ctrl\+space|cmd\+[cv]|alt\+(left|right)|ctrl\+g|neighboring_window|goto_tab|launch.*split' \
+  kitty/kitty.conf kitty/common.conf kitty/linux.conf
+
+# Legacy references must remain unchanged, and whitespace must be clean.
+git diff --exit-code -- kitty/work zsh/work kitty/kitty.macos.conf
+git diff --check
+
+# Review every untracked path; no generated private state may appear.
+git status --short --untracked-files=all
 ```
 
-Kitty and Zellij validation commands will be finalized after their installed versions are known.
+Expected results: every Zsh command exits zero; Kitty prints only
+`bad_lines=0`; both `rg` commands and the legacy `git diff` print nothing;
+`git diff --check` exits zero; status lists only the intended files in this
+phase. The status must not contain `.zsh_history`, `.zcompdump`, `.env`, cache
+directories, credentials, tokens, SSH files, or an audit report.
 
-Rollback: discard or revert only the branch commit. No live home configuration is affected.
+Stop on any parser warning, unexpected path, forbidden binding, legacy diff,
+whitespace error, or unexplained status entry.
 
-### Phase 6 - Test without changing live home configuration (`planned`)
+Observed on 2026-08-16:
 
-Start Zsh explicitly and launch Kitty with an explicit test configuration.
+- All nine Zsh files, including the two legacy files, passed `zsh -n`.
+- Kitty 0.47.1 parsed `kitty/kitty.conf` with `bad_lines=0` and no warnings.
+- Effective Kitty settings retained URL detection, the `monospace` fallback,
+  Wayland, and default `Ctrl+Shift+C/V`; Ctrl+Space, Alt+Left, and Ctrl+G had no
+  Kitty action.
+- An isolated PTY-backed Zsh load with `HISTFILE=/dev/null` confirmed native
+  Emacs bindings, fzf Ctrl+T, eza aliases, zoxide, autosuggestions, syntax
+  highlighting, and the fallback prompt.
+- Forbidden-path, shortcut-ownership, private-state, and legacy-diff checks
+  produced no matches. `git diff --check` passed.
+- Repository validation alone does not physically verify settings; the separate
+  user-verified Phase 6 results are recorded below.
 
-Validate:
+Rollback before deployment: revert the eventual branch commit, or—while still
+uncommitted—remove only the exact new files listed in this phase and restore
+only `README.md` and this document after reviewing their diffs. No live home
+configuration is affected.
 
-- Prompt and Nerd Font glyph rendering
-- Hangul input and input-method switching
-- `Ctrl+C` interruption of a long-running command
-- `Ctrl+Shift+C/V` terminal copy and paste
-- Zsh completion, autosuggestions, and syntax highlighting
-- Starship Git state and project runtime detection
-- Zellij panes, tabs, detach/attach, and layouts
-- KDE global-shortcut behavior
+### Phase 6 - Test without changing live home configuration (`completed, user-verified`)
 
-Rollback: close the test shell or terminal window.
+Launch a new Kitty window that uses both proposed repository profiles:
+
+```bash
+HISTFILE=/dev/null \
+ZDOTDIR="$HOME/src/config/zsh" \
+kitty --config "$HOME/src/config/kitty/kitty.conf" /usr/bin/zsh -d
+```
+
+- `HISTFILE=/dev/null` prevents this isolated test from writing command history.
+- `ZDOTDIR` points Zsh to the proposed repository configuration.
+- `/usr/bin/zsh -d` skips global Zsh startup files while still loading the proposed
+  interactive `.zshrc`.
+- Closing the test Kitty window is the rollback.
+
+User-verified results:
+
+- The proposed Kitty configuration launched successfully.
+- The proposed Bare Zsh profile loaded successfully.
+- `HISTFILE=/dev/null` prevented persistent test history.
+- Emacs `Ctrl+A` and `Ctrl+E` line-editing bindings worked.
+- `Ctrl+C` interrupted the foreground command.
+- Native Zsh completion worked.
+- Autosuggestions and syntax highlighting worked.
+- fzf `Ctrl+R` history search and `Ctrl+T` file selection worked.
+- zoxide initialization and navigation worked.
+- Guarded eza aliases were available.
+- Fcitx5 retained `Ctrl+Space`, and Hangul input worked.
+- Kitty retained `Ctrl+Shift+C/V` clipboard behavior.
+- Kitty URL detection worked.
+
+Terminal bell policy, macOS runtime behavior, Starship, Zellij, Nerd Font,
+Neovim, symlink deployment, and the login-shell change remain deferred or
+unverified.
+
+Rollback: close the test Kitty window.
 
 ### Phase 7 - Deploy symlinks (`planned`)
 
@@ -561,34 +670,45 @@ Expected links:
 ~/.zshrc                    -> ~/src/config/zsh/.zshrc
 ```
 
-### Phase 8 - Physical verification (`planned`)
+### Phase 8 - Broader physical verification (`partially completed`)
+
+Phase 6 user-verified Fcitx5 `Ctrl+Space`, Hangul input, Kitty clipboard
+behavior, URL detection, and the proposed Kitty and Zsh profiles. These broader
+items remain unverified or deferred:
 
 - Confirm that Apple Command arrives as Super and Option as Alt.
-- Test Fcitx5 `Ctrl+Space`.
 - Test KDE `Meta+V`, Overview, screenshots, and virtual desktops.
-- Test Kitty clipboard and font-size controls.
-- Test Zellij panes, tabs, sessions, and layouts.
-- If Neovim has been added, test editor-split ownership.
+- Test Kitty font-size controls.
+- Select and test the terminal bell policy.
+- Test the macOS profile on macOS.
+- Test Starship, Zellij, Nerd Font, and Neovim after their deferred phases.
+- Test symlink deployment only after target inspection and backups are approved.
 - Compare readability, smoothness, and battery use before and after enabling transparency.
 
 Do not mark an item verified merely because its configuration parses.
 
 ### Phase 9 - Finalize the branch (`planned`)
 
-After repository validation and physical testing:
+After repository validation and physical testing, and only with explicit
+approval to stage and commit:
 
 ```bash
 cd ~/src/config
 git status --short --branch
 git diff --check
-git add --all
+git add \
+  AGENTS.md \
+  README.md \
+  docs/fedora-asahi-development-setup.md \
+  kitty/kitty.conf kitty/common.conf kitty/linux.conf kitty/macos.conf \
+  zsh/.zshrc zsh/conf.d
 git diff --cached
 git commit -m "feat: add Fedora Asahi terminal environment"
 ```
 
-Do not use `git add --all` until the untracked duplicate setup file and audit
-report have been moved outside the repository and the complete status has been
-reviewed.
+Do not use `git add --all`. Review `git status --short --untracked-files=all`
+and the explicit path list first so an audit report or private state cannot be
+staged accidentally.
 
 Merge only after the deployed configuration has passed Phase 8:
 
@@ -654,15 +774,13 @@ fi
 
 ## 11. Next checkpoint
 
-The next action is Phase 3:
+Review the first repository-only Kitty and Zsh pass together with the completed
+Phase 6 user-verified results. Decide separately whether any remaining Phase 8
+Linux tests should be performed before deployment planning.
 
-1. Confirm the canonical document is tracked.
-2. Move the untracked duplicate setup file and audit outside the repository.
-3. Install the five approved Fedora shell packages.
-4. Capture package versions, executable paths, and Zsh plugin source paths.
-
-After that output is reviewed, decide the pinned Starship, Zellij, and Nerd Font
-installation procedure before starting the repository refactor.
+Keep Starship, Zellij, the Nerd Font, Neovim, symlink deployment, terminal bell
+policy, and `chsh` deferred until each corresponding decision and rollback plan
+receives explicit approval.
 
 ## References
 

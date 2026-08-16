@@ -272,7 +272,7 @@ Do not delete `kitty/work`, `zsh/work`, or `kitty/kitty.macos.conf` until the re
 
 Rollback: none; this phase was read-only.
 
-### Phase 1 - Create the working branch and commit documentation (`next`)
+### Phase 1 - Create the working branch and commit documentation (`completed`)
 
 All repository work starts on a dedicated branch before files are added or
 refactored:
@@ -339,7 +339,17 @@ configuration only after the policy has been selected.
 Rollback: remove only the added directive and reload Kitty. Do not delete the
 file if it contains any unrelated setting.
 
-### Phase 2 - Query package availability (`planned`)
+Observed repository state after this phase:
+
+```text
+Branch: feat/fedora-asahi-dev-env
+Commit: c12a5d3 docs: document Fedora Asahi environment setup
+```
+
+The terminal-bell option remains deferred because no physical test result has
+been recorded yet.
+
+### Phase 2 - Query package availability (`completed`)
 
 Do not install anything yet. Query Fedora 44 aarch64 repositories for candidate packages:
 
@@ -370,7 +380,125 @@ git -C ~/src/config status --short --branch
 
 Stop condition: if Fedora does not provide Zellij or Starship, do not add a COPR or execute an installation script automatically. Compare the official prebuilt binary, Cargo, and external-repository options first.
 
-### Phase 3 - Refactor inside the repository only (`planned`)
+Observed Fedora 44 aarch64 results:
+
+| Package | Version | Repository | Decision |
+|---|---:|---|---|
+| `zsh-autosuggestions` | 0.7.1-4.fc44 | Fedora | install in Phase 3 |
+| `zsh-syntax-highlighting` | 0.8.0-7.fc44 | Fedora | install in Phase 3 |
+| `fzf` | 0.74.2-1.fc44 | updates | install in Phase 3 |
+| `zoxide` | 0.9.8-2.fc44 | Fedora | install in Phase 3 |
+| `eza` | 0.23.5-1.fc44 | updates | install in Phase 3 |
+| `neovim` | 0.12.4-3.fc44 | updates | defer until the shell is stable |
+| `starship` | no match in enabled repositories | - | compare external options in Phase 4 |
+| `zellij` | no match in enabled repositories | - | compare external options in Phase 4 |
+
+At the time of the query, only `kitty`, `zsh`, `git`, and `rg` from this toolset
+were present on `PATH`.
+
+Repository hygiene check:
+
+```text
+?? docs/SETUP.md
+?? docs/fedora-asahi-dotfiles-audit.md
+```
+
+Both are intentionally excluded from Git. Confirm that the canonical English
+document is tracked, then move these two untracked artifacts outside the
+repository rather than deleting them without inspection.
+
+### Phase 3 - Install Fedora-packaged shell dependencies (`next`)
+
+First confirm the tracked document and the two untracked artifacts:
+
+```bash
+cd ~/src/config
+git ls-files docs
+git status --short --branch
+```
+
+Expected tracked document:
+
+```text
+docs/fedora-asahi-development-setup.md
+```
+
+If that file is present, preserve the untracked duplicate and audit outside the
+repository:
+
+```bash
+mkdir -p ~/Documents/asahi-setup-notes
+mv -n -v docs/SETUP.md docs/fedora-asahi-dotfiles-audit.md \
+  ~/Documents/asahi-setup-notes/
+git status --short --branch
+```
+
+Stop if either source file is absent, either destination file already exists,
+or the tracked canonical document is missing. Resolve the exact paths rather
+than forcing an overwrite.
+
+Install the five approved Fedora packages. Keep Neovim separate:
+
+```bash
+sudo dnf install \
+  zsh-autosuggestions \
+  zsh-syntax-highlighting \
+  fzf \
+  zoxide \
+  eza
+```
+
+Verify commands, package versions, and the Zsh plugin source paths:
+
+```bash
+command -v fzf zoxide eza
+
+rpm -q \
+  zsh-autosuggestions \
+  zsh-syntax-highlighting \
+  fzf \
+  zoxide \
+  eza
+
+rpm -ql zsh-autosuggestions | rg 'zsh-autosuggestions\.zsh$'
+rpm -ql zsh-syntax-highlighting | rg 'zsh-syntax-highlighting\.zsh$'
+```
+
+Rollback: record the packages added by this transaction. Do not remove any
+package that existed before this setup.
+
+### Phase 4 - Decide external binaries and the Nerd Font (`planned`)
+
+Starship and Zellij were not available from the currently enabled Fedora or
+Fedora Asahi repositories. Do not add another COPR automatically.
+
+Preferred approach: install version-pinned, checksum-verified upstream aarch64
+Linux binaries into `~/.local/bin`. This requires no root access, does not grant
+an external repository ongoing package-manager trust, and can be rolled back by
+removing two explicit files. The tradeoff is that updates are manual and must
+be documented.
+
+Release candidates observed on 2026-08-16:
+
+| Tool | Candidate | Asset |
+|---|---:|---|
+| Starship | 1.26.0 | `starship-aarch64-unknown-linux-musl.tar.gz` |
+| Zellij | 0.44.3 | `zellij-aarch64-unknown-linux-musl.tar.gz` |
+
+Alternatives:
+
+- Starship's Fedora instructions use the third-party `atim/starship` COPR.
+- Both projects can be installed with Cargo, at the cost of a Rust toolchain and
+  local compilation.
+- Piping a remote installation script directly into a shell is convenient but
+  less auditable and is not the preferred reproducible path.
+
+Do not install either binary until the exact release URLs, upstream checksum
+files, destination, update procedure, and rollback command have been reviewed.
+Select and install the Nerd Font in the same phase so prompt glyphs can be
+tested immediately.
+
+### Phase 5 - Refactor inside the repository only (`planned`)
 
 - Create a dedicated Git branch.
 - Keep this setup record current; retain the audit report outside Git.
@@ -381,7 +509,7 @@ Stop condition: if Fedora does not provide Zellij or Starship, do not add a COPR
 - Add draft Starship and Zellij configurations.
 - Preserve the existing files as legacy reference.
 
-Do not install packages, create home-directory symlinks, or run `chsh` in this phase.
+Do not create home-directory symlinks or run `chsh` in this phase.
 
 Initial validation:
 
@@ -395,21 +523,7 @@ Kitty and Zellij validation commands will be finalized after their installed ver
 
 Rollback: discard or revert only the branch commit. No live home configuration is affected.
 
-### Phase 4 - Install approved dependencies (`planned`)
-
-Finalize package names and installation sources after reviewing Phase 2 output.
-
-Rules:
-
-- Prefer official Fedora packages.
-- Do not add an external repository merely because Starship or Zellij is absent from Fedora.
-- Document the Nerd Font source and installation path.
-- Keep Neovim and compiler/toolchain installation separate from shell migration.
-- Record the exact set of packages added by this setup.
-
-Rollback: remove only packages introduced by this phase. Do not remove pre-existing dependencies.
-
-### Phase 5 - Test without changing live home configuration (`planned`)
+### Phase 6 - Test without changing live home configuration (`planned`)
 
 Start Zsh explicitly and launch Kitty with an explicit test configuration.
 
@@ -426,7 +540,7 @@ Validate:
 
 Rollback: close the test shell or terminal window.
 
-### Phase 6 - Deploy symlinks (`planned`)
+### Phase 7 - Deploy symlinks (`planned`)
 
 The bootstrap script must default to `--dry-run` and meet these requirements:
 
@@ -447,7 +561,7 @@ Expected links:
 ~/.zshrc                    -> ~/src/config/zsh/.zshrc
 ```
 
-### Phase 7 - Physical verification (`planned`)
+### Phase 8 - Physical verification (`planned`)
 
 - Confirm that Apple Command arrives as Super and Option as Alt.
 - Test Fcitx5 `Ctrl+Space`.
@@ -459,7 +573,31 @@ Expected links:
 
 Do not mark an item verified merely because its configuration parses.
 
-### Phase 8 - Change the login shell (`optional and last`)
+### Phase 9 - Finalize the branch (`planned`)
+
+After repository validation and physical testing:
+
+```bash
+cd ~/src/config
+git status --short --branch
+git diff --check
+git add --all
+git diff --cached
+git commit -m "feat: add Fedora Asahi terminal environment"
+```
+
+Do not use `git add --all` until the untracked duplicate setup file and audit
+report have been moved outside the repository and the complete status has been
+reviewed.
+
+Merge only after the deployed configuration has passed Phase 8:
+
+```bash
+git switch main
+git merge --ff-only feat/fedora-asahi-dev-env
+```
+
+### Phase 10 - Change the login shell (`optional and last`)
 
 Consider this only after Zsh has worked reliably inside Kitty for several days:
 
@@ -516,15 +654,15 @@ fi
 
 ## 11. Next checkpoint
 
-The next action is Phase 1: create or switch to the dedicated branch and commit
-only this setup document. Then run the read-only package and command query in
-Phase 2. Review that output before deciding:
+The next action is Phase 3:
 
-1. How to install Starship and Zellij
-2. How to install the selected Nerd Font
-3. Which paths Fedora uses for the packaged Zsh plugins
-4. The exact scope of the repository refactor
-5. The file list for the first implementation commit
+1. Confirm the canonical document is tracked.
+2. Move the untracked duplicate setup file and audit outside the repository.
+3. Install the five approved Fedora shell packages.
+4. Capture package versions, executable paths, and Zsh plugin source paths.
+
+After that output is reviewed, decide the pinned Starship, Zellij, and Nerd Font
+installation procedure before starting the repository refactor.
 
 ## References
 
@@ -532,7 +670,9 @@ Phase 2. Review that output before deciding:
 - Zellij user guide: <https://zellij.dev/documentation/>
 - Starship configuration: <https://starship.rs/config/>
 - Starship presets: <https://starship.rs/presets/>
+- Starship releases: <https://github.com/starship/starship/releases>
 - Zsh documentation: <https://zsh.sourceforge.io/Doc/>
+- Zellij releases: <https://github.com/zellij-org/zellij/releases>
 - Fedora packages: <https://packages.fedoraproject.org/>
 - KDE Accessibility and System Bell: <https://docs.kde.org/stable_kf6/en/plasma-desktop/kcontrol/kcmaccess/kcmaccess.pdf>
 - Powerlevel10k support status: <https://github.com/romkatv/powerlevel10k>

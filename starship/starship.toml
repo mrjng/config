@@ -1,0 +1,71 @@
+# A compact prompt: navigation and Git on the left, project context on the right.
+add_newline = true
+format = "$username$hostname$directory$git_branch$git_status$cmd_duration$status$line_break$character"
+right_format = "$package$nodejs$python$rust$golang"
+
+[directory]
+style = "bold blue"
+truncation_length = 4
+truncate_to_repo = false
+read_only = " 󰌾"
+
+[git_branch]
+symbol = " "
+style = "bold magenta"
+format = "[on $symbol$branch(:$remote_branch)]($style) "
+
+[git_status]
+style = "yellow"
+format = "([$all_status$ahead_behind]($style) )"
+conflicted = "=${count} "
+ahead = "⇡${count} "
+behind = "⇣${count} "
+diverged = "⇕⇡${ahead_count}⇣${behind_count} "
+untracked = "?${count} "
+stashed = "*${count} "
+modified = "!${count} "
+staged = "+${count} "
+renamed = "»${count} "
+deleted = "✘${count} "
+
+[cmd_duration]
+min_time = 2_000
+show_milliseconds = false
+style = "yellow"
+format = "[󰔛 $duration]($style) "
+
+[status]
+disabled = false
+style = "bold red"
+symbol = "✘"
+format = "[$symbol $status]($style) "
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+
+# These modules appear only when Starship detects a matching project.
+[package]
+symbol = "󰏗 "
+style = "dimmed yellow"
+format = "[$symbol$version]($style) "
+
+[nodejs]
+symbol = " "
+style = "green"
+format = "[$symbol($version)]($style) "
+
+[python]
+symbol = " "
+style = "yellow"
+format = '[$symbol($version)( \($virtualenv\))]($style) '
+
+[rust]
+symbol = " "
+style = "red"
+format = "[$symbol($version)]($style) "
+
+[golang]
+symbol = " "
+style = "cyan"
+format = "[$symbol($version)]($style) "

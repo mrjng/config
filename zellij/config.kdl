@@ -1,0 +1,24 @@
+// Keep Zellij's 0.44.3 default modes and keybindings. In particular, this
+// profile does not claim Ctrl+Space or Kitty's Ctrl+Shift+C/V shortcuts.
+theme "monokai-soda"
+
+// Resolve Zsh through PATH so ordinary launches use it before chsh on both
+// supported platforms without hard-coding a platform-specific path.
+default_shell "zsh"
+
+// Colors follow the Monokai Soda palette already used by Kitty.
+themes {
+    monokai-soda {
+        fg 196 196 181
+        bg 25 25 25
+        black 25 25 25
+        red 243 0 95
+        green 151 224 35
+        yellow 223 213 97
+        blue 156 100 254
+        magenta 243 0 95
+        cyan 87 209 234
+        white 246 246 238
+        orange 250 132 25
+    }
+}

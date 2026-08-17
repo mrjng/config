@@ -30,7 +30,7 @@ if (( $+commands[zoxide] )); then
   eval "$(zoxide init zsh)"
 fi
 
-# Starship is deferred. This guard leaves the fallback prompt usable when absent.
+# Keep the fallback prompt usable before Starship is installed or deployed.
 if (( $+commands[starship] )); then
   eval "$(starship init zsh)"
 fi

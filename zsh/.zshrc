@@ -1,6 +1,17 @@
 # Bare Zsh profile. Oh My Zsh and Powerlevel10k are intentionally not required.
 [[ -o interactive ]] || return
 
+# Make user-local commands available before initializing shell integrations.
+for _dotfiles_user_bin_dir in "$HOME/bin" "$HOME/.local/bin"; do
+  [[ $_dotfiles_user_bin_dir == "$HOME/.local/bin" || \
+    -d $_dotfiles_user_bin_dir ]] || continue
+  case ":$PATH:" in
+    *":$_dotfiles_user_bin_dir:"*) ;;
+    *) PATH="$_dotfiles_user_bin_dir:$PATH" ;;
+  esac
+done
+unset _dotfiles_user_bin_dir
+
 typeset -g _dotfiles_zsh_root=${${(%):-%N}:A:h}
 typeset -g _dotfiles_autosuggestions_source=''
 typeset -g _dotfiles_syntax_highlighting_source=''

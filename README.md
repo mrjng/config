@@ -1,11 +1,13 @@
 # Dotfiles
 
-Concise, cross-platform terminal configuration with Fedora Asahi Linux and
-macOS profiles. Fedora currently uses [Kitty](kitty/kitty.conf) and bare
-[Zsh](zsh/.zshrc); legacy configurations remain available as reference.
+Concise terminal configuration for Fedora Asahi Linux and macOS. The Fedora
+stack uses Kitty, bare Zsh, Starship, Zellij, MesloLGS Nerd Font Mono, and
+Fcitx5 Hangul input. Legacy configurations remain tracked as reference.
 
-See the [Fedora Asahi development setup](docs/fedora-asahi-development-setup.md)
-for status, validation, migration, and rollback procedures.
+The [Fedora Asahi reproduction guide](docs/fedora-asahi-development-setup.md)
+is the authoritative procedure for package installation, pinned artifacts,
+safe deployment, validation, updates, and rollback.
 
-Deployment is not automatic. This repository does not install packages,
-change the login shell, or create home-directory links by itself.
+This repository does not install software, create home-directory symlinks, or
+change the login shell automatically. Fedora Asahi installation and macOS
+setup are outside the guide.

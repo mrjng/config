@@ -1,797 +1,1065 @@
-# Fedora Asahi Development Environment Setup
+# Fedora Asahi Terminal Environment Reproduction Guide
 
-Last updated: 2026-08-16
+Last updated: 2026-08-20
 
-This document records the reproducible setup of a Fedora Asahi development environment. It tracks decisions, observed state, validation, migration steps, and rollback points rather than serving as a package list alone.
+Run commands in order and one block at a time. Read each expected result and
+stop condition before continuing. This repository does not install packages,
+deploy configuration, or change the login shell automatically.
 
-## Status labels
+## 1. Scope and resulting stack
 
-- `applied`: a command or file change has been completed
-- `verified`: behavior has been confirmed from command output or physical testing
-- `planned`: the direction is agreed upon but has not been applied
-- `deferred`: a dependency or decision is still required
+This guide begins after Fedora Asahi Linux is installed and booted on an
+`aarch64` machine with KDE Plasma on Wayland. Fedora Asahi installation and
+macOS setup are outside its scope.
 
-A configuration that parses successfully is not considered physically verified.
-
-Current phase status:
-
-| Phase | State | Evidence or next condition |
+| Layer | Component | Responsibility |
 |---|---|---|
-| Baseline and audit | completed | System, shortcuts, and legacy configuration recorded |
-| Fedora shell packages | completed | Exact RPM versions and plugin paths recorded below |
-| Repository-only Kitty and Zsh pass | applied | Proposed files exist on `feat/fedora-asahi-dev-env`; validation is recorded below |
-| Isolated Kitty and Bare Zsh test | completed, user-verified | Proposed profiles and listed interactive behavior passed Phase 6 |
-| Starship, Zellij, Nerd Font, Neovim | deferred | No active configuration or installation in this pass |
-| Symlink deployment | deferred | Requires explicit approval, target inspection, and backups |
-| Terminal bell policy | deferred | Bell behavior was not selected during the isolated test |
-| macOS runtime behavior | unverified | The proposed macOS profile has not been run on macOS |
-| Login-shell change | deferred | Bash remains the account shell |
+| Terminal | Kitty | Rendering, fonts, URLs, and terminal clipboard |
+| Shell | Bare Zsh | Completion, history, aliases, and integrations |
+| Prompt | Starship 1.26.0 | Directory, Git, duration, status, and project context |
+| Multiplexer | Zellij 0.44.3 | Panes, tabs, sessions, and layouts |
+| Font | MesloLGS Nerd Font Mono 3.5.0 | Prompt and status-line glyphs |
+| Input | Fcitx5 Hangul | Korean input, toggled with `Ctrl+Space` |
 
-## 1. Goals
+Fcitx5 owns `Ctrl+Space`; Kitty owns `Ctrl+Shift+C` and `Ctrl+Shift+V`;
+Zellij owns panes, tabs, sessions, and layouts; KDE keeps desktop shortcuts
+such as `Meta+V`. Zellij is not started automatically by `.zshrc`. Terminal
+bell suppression remains inactive until physical testing selects a policy.
 
-- Build a Kitty, Zellij, Zsh, and Starship-based environment on Fedora Asahi.
-- Preserve useful behavior from the existing macOS-oriented dotfiles.
-- Separate macOS-only paths and behavior from Fedora/KDE/Wayland configuration.
-- Keep configuration under version control in `~/src/config`.
-- Document installation, validation, and rollback so the setup can be repeated on another machine.
-- Keep package installation, dotfile deployment, and login-shell changes as independent operations.
+## 2. Prerequisites
 
-## 2. Baseline system state
+Use a trusted network and allow at least 500 MiB of free space under `/tmp` and
+the home filesystem. Artifact blocks use Bash strict mode even when Zsh is the
+login shell.
 
-| Item | Observed state | Status |
-|---|---|---|
-| Hardware | Apple Silicon M1 Pro | verified |
-| Operating system | Fedora Asahi Remix 44, aarch64 | verified |
-| Desktop | KDE Plasma on Wayland | verified |
-| Terminal | Kitty 0.47.1 | installed and verified |
-| Shell | Zsh 5.9 installed; Bash remains the account shell | installed and verified |
-| Git | 2.55.0 | installed and verified |
-| ripgrep | 15.2.0 | installed |
-| fzf | 0.74.2 | installed and verified from RPM |
-| zoxide | 0.9.8 | installed and verified from RPM |
-| eza | 0.23.5 | installed and verified from RPM |
-| Zsh autosuggestions | 0.7.1 | installed and source path verified |
-| Zsh syntax highlighting | 0.8.0 | installed and source path verified |
-| Input method | Fcitx5 Hangul, toggled with `Ctrl+Space` | user-verified |
-| Apple function keys | `hid_apple.fnmode=2` | applied |
-
-Environment observed inside Kitty:
-
-```text
-TERM=xterm-kitty
-SHELL=/bin/bash
-SESSION=wayland
-```
-
-Isolated Zsh test:
-
-```text
-PROCESS=zsh
-ZSH_VERSION=5.9
-DEFAULT_SHELL=/bin/bash
-Zsh Hangul input: verified
-```
-
-Zsh and Hangul input work correctly. The login shell remains Bash because `chsh` has not been run.
-
-## 3. Completed work
-
-### Base packages
-
-Kitty, Zsh, and Git were installed with:
+Confirm the platform before installing anything:
 
 ```bash
-sudo dnf install kitty zsh git
+(
+  set -euo pipefail
+  [[ $(uname -m) == aarch64 ]]
+  grep -Ei 'Fedora.*Asahi' /etc/os-release
+  printf 'desktop=%s session=%s shell=%s\n' \
+    "${XDG_CURRENT_DESKTOP-}" "${XDG_SESSION_TYPE-}" "${SHELL-}"
+  df -h /tmp "$HOME"
+)
 ```
 
-ripgrep was installed as a weak dependency. The following command paths were verified:
+Expected results are `aarch64`, Fedora Asahi, KDE, and Wayland. Stop if the
+architecture or OS differs, either filesystem is nearly full, or the machine
+identity is uncertain. The pinned binaries below are Linux `aarch64` builds.
 
-```text
-/usr/bin/kitty
-/usr/bin/zsh
-/usr/bin/git
-```
-
-`/usr/bin/zsh` is present in `/etc/shells`.
-
-### Fedora shell packages
-
-The Fedora shell-package phase is completed. These exact packages are
-installed:
-
-```text
-zsh-autosuggestions-0.7.1-4.fc44.noarch
-zsh-syntax-highlighting-0.8.0-7.fc44.noarch
-fzf-0.74.2-1.fc44.aarch64
-zoxide-0.9.8-2.fc44.aarch64
-eza-0.23.5-1.fc44.aarch64
-```
-
-Confirmed plugin source paths:
-
-```text
-/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-/usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
-```
-
-`rpm -ql fzf` confirmed `/usr/share/fzf/shell/key-bindings.zsh` and
-`/usr/share/zsh/site-functions/_fzf`. Fedora's package does not install a Zsh
-`completion.zsh`; native `compinit` discovers the packaged `_fzf` completion,
-while the key-binding file is sourced only when readable.
-
-Reproduce the package and path checks with:
+Inspect existing commands and targets without changing them:
 
 ```bash
-rpm -q \
-  zsh-autosuggestions \
-  zsh-syntax-highlighting \
-  fzf \
-  zoxide \
-  eza
+command -v dnf sudo bash
 
-rpm -ql zsh-autosuggestions | rg 'zsh-autosuggestions\.zsh$'
-rpm -ql zsh-syntax-highlighting | rg 'zsh-syntax-highlighting\.zsh$'
-rpm -ql fzf | rg '/(key-bindings\.zsh|_fzf)$'
+for target in \
+  "$HOME/.config/kitty/kitty.conf" \
+  "$HOME/.config/kitty/common.conf" \
+  "$HOME/.config/kitty/linux.conf" \
+  "$HOME/.config/kitty/work/current-theme.conf" \
+  "$HOME/.config/starship.toml" \
+  "$HOME/.config/zellij/config.kdl" \
+  "$HOME/.zshrc"; do
+  if [[ -e $target || -L $target ]]; then
+    ls -ld -- "$target"
+  else
+    printf 'absent: %s\n' "$target"
+  fi
+done
 ```
 
-Stop if an expected file is absent or unreadable. Do not replace a missing
-Fedora file with a remote script; update the guarded repository path only after
-the installed package layout has been inspected.
+Do not continue past an existing target until section 6. Never overwrite an
+unexpected file, directory, symlink, or dangling symlink.
 
-### Dotfiles repository
+## 3. Fedora packages
 
-```bash
-mkdir -p ~/src
-git clone https://github.com/mrjng/config.git ~/src/config
-```
-
-The repository was clean on `main...origin/main`, and no submodules were configured. Files present at the time of the audit:
-
-```text
-kitty/kitty.macos.conf
-kitty/work/current-theme.conf
-kitty/work/kitty.conf
-README.md
-zsh/work/.zshrc
-zsh/work/.zshrc_custom
-```
-
-### Dotfiles audit
-
-Codex CLI 0.147.0 was used from `~/src/config` to audit Fedora Asahi compatibility. The audit did not modify files, install packages, create symlinks, or run `chsh`.
-
-The detailed audit report is retained as an external diagnostic artifact and is
-intentionally not committed. Confirmed decisions and reproducible procedures
-belong in this document instead.
-
-## 4. Confirmed audit findings
-
-### Deployment state
-
-- The repository's Kitty and Zsh configurations have not been deployed.
-- `~/.config/kitty/` was empty, and `~/.zshrc` was absent.
-- Bash remains the account login shell.
-
-### Existing Kitty configuration
-
-- Both Kitty files are roughly 2,800-line snapshots of older generated defaults with custom settings embedded throughout.
-- `mmap` is not a valid Kitty 0.47.1 directive, so the existing `Ctrl+G` mapping does nothing.
-- `/Users/...` wallpaper paths and `/opt/homebrew/bin/nvim` are invalid on Fedora.
-- `macos_option_as_alt` is macOS-specific.
-- Kitty interprets `cmd` as Super/Meta on Linux. The tracked `cmd+v` conflicts with KDE's `Meta+V` clipboard-history shortcut.
-- Kitty pane shortcuts duplicate Zellij if Zellij is adopted as the primary multiplexer.
-
-### Existing Zsh configuration
-
-- The tracked `.zshrc` assumes that Oh My Zsh and Powerlevel10k are installed.
-- `zsh-autosuggestions`, `zsh-syntax-highlighting`, `eza`, Neovim, and MesloLGS NF were not installed at audit time.
-- The `vi` alias unconditionally points to missing Neovim.
-- The `eza`-based aliases cannot currently run.
-
-### Shortcut ownership
-
-| Shortcut | Owner | Decision |
-|---|---|---|
-| `Ctrl+C` | shell/TUI | Preserve for SIGINT and application input |
-| `Ctrl+V` | shell/TUI | Preserve for quoted insert and application input |
-| `Ctrl+Shift+C/V` | Kitty | Retain for terminal copy and paste |
-| `Ctrl+Space` | Fcitx5 | Reserve for Hangul input switching |
-| `Meta+V` | KDE | Retain for clipboard history |
-| panes, tabs, sessions | Zellij | Do not duplicate in Kitty |
-| editor splits | Neovim | Manage with `<C-w>` or leader mappings |
-
-### Optional feature: terminal bell policy
-
-Status: `deferred until tested`
-
-Shell completion can emit the terminal BEL character, for example when `Tab`
-has no useful completion. On Wayland, Kitty may ask the compositor to play the
-system-default bell, so the trigger can originate in the shell and Kitty even
-when the sound itself appears to come from KDE.
-
-Identify the scope before changing a persistent setting:
-
-```bash
-# Test the normal bell in the current terminal.
-printf '\a'
-
-# Open an isolated Kitty window with only its audible bell disabled.
-kitty -o enable_audio_bell=no
-```
-
-Run `printf '\a'` in the isolated window and compare it with the original
-window and with the sound caused by `Tab` completion.
-
-Available policies:
-
-| Scope | Setting | Benefit | Cost |
-|---|---|---|---|
-| Kitty only | `enable_audio_bell no` | Silences terminal BEL without changing other desktop sounds | Other applications may still use the system bell |
-| KDE system-wide | Disable **Use System Bell** in System Settings > Accessibility > System Bell | Silences the system bell for all applications | Removes an accessibility and attention cue globally |
-| Keep default | No change | Preserves traditional feedback | Completion failures can produce an unwanted sound |
-
-Preferred default: use the Kitty-only setting if the isolated test becomes
-silent. Use the KDE system-wide setting only when the same bell is unwanted in
-all applications. Do not apply both initially because doing so obscures which
-layer solved the issue.
-
-The `window_alert_on_bell` and `bell_on_tab` visual indicators are separate and
-remain unchanged unless they also prove distracting.
-
-## 5. Recommended stack
-
-| Area | Choice | Responsibility |
-|---|---|---|
-| Terminal emulator | Kitty | Rendering, fonts, colors, clipboard |
-| Multiplexer | Zellij | Panes, tabs, sessions, project layouts |
-| Shell | Bare Zsh | Completion, history, aliases, line editing |
-| Prompt | Starship | Path, Git state, runtimes, command status |
-| Suggestions | zsh-autosuggestions | History-based command suggestions |
-| Highlighting | zsh-syntax-highlighting | Interactive command highlighting |
-| Search | fzf | Fuzzy file and history search |
-| Navigation | zoxide | Frecency-based directory navigation |
-| Font | MesloLGS Nerd Font initially | Compatibility with the previous P10k appearance |
-| Theme | Catppuccin Mocha family | Consistent Kitty, Starship, and Zellij colors |
-| Editor | Neovim | Configure after the shell is stable |
-
-Atuin is deferred until shell-history storage, synchronization, and sensitive-data policies are explicitly decided.
-
-## 6. Oh My Zsh and Powerlevel10k migration
-
-Oh My Zsh is not deprecated. The new profile will avoid it to make dependencies and startup order more explicit, not because the framework is unusable.
-
-Powerlevel10k is in limited-support mode. The existing files will remain available as legacy reference until the replacement has been validated.
-
-The replacement is not Starship alone:
-
-```text
-Oh My Zsh prompt/theme      -> Starship
-Oh My Zsh completion       -> Native Zsh completion
-Autosuggestions            -> Fedora-packaged Zsh plugin
-Syntax highlighting        -> Fedora-packaged Zsh plugin
-Oh My Zsh aliases/functions -> Migrate only those still in use
-```
-
-Expected benefits:
-
-- Shell behavior and prompt design are separated between `.zshrc` and `starship.toml`.
-- The same prompt configuration can be reused on Linux and macOS.
-- Only required plugins are loaded, making startup failures easier to diagnose.
-- Catppuccin, Pastel Powerline, and similar presets can preserve a decorated P10k-like appearance.
-- The new setup does not depend on a prompt project with limited maintenance.
-
-Costs and limitations:
-
-- Some Oh My Zsh aliases and completions must be selected and migrated manually.
-- Starship does not reproduce the P10k configuration wizard or every Zsh-specific prompt behavior.
-- Starship adds a separate binary dependency.
-- Enabling too many modules can make the prompt wide or slow.
-
-## 7. Repository layout
-
-The first repository-only pass creates this proposed, undeployed configuration:
-
-```text
-README.md
-AGENTS.md
-docs/
-  fedora-asahi-development-setup.md
-kitty/
-  kitty.conf                 # Fedora entry point
-  common.conf
-  linux.conf
-  macos.conf                 # standalone macOS entry point
-zsh/
-  .zshrc
-  conf.d/
-    aliases.zsh
-    completion.zsh
-    history.zsh
-    interactive.zsh
-    linux.zsh
-    macos.zsh
-```
-
-`kitty/common.conf` temporarily reuses the platform-neutral
-`kitty/work/current-theme.conf`. A new theme, Starship configuration, Zellij
-configuration and layouts, Nerd Font assets, Neovim configuration, and a
-bootstrap script are deferred. None should be created merely to fill out a
-planned directory tree.
-
-If deployment is later approved, use explicit symlinks and a small bootstrap
-script at the current repository scale. Reconsider GNU Stow if the repository
-grows into many independent configuration packages.
-
-Do not delete or modify `kitty/work`, `zsh/work`, or
-`kitty/kitty.macos.conf`; they remain legacy references until the replacement
-has been physically verified.
-
-## 8. Migration plan
-
-### Phase 0 - Record the baseline (`completed`)
-
-- Record installed versions and executable paths.
-- Verify Kitty, Wayland, isolated Zsh, and Hangul input.
-- Clone the repository and confirm a clean working tree.
-- Audit existing dotfiles.
-
-Rollback: none; this phase was read-only.
-
-### Phase 1 - Create the working branch and commit documentation (`completed`)
-
-All repository work starts on a dedicated branch before files are added or
-refactored:
-
-```bash
-cd ~/src/config
-git status --short --branch
-git branch --show-current
-git switch -c feat/fedora-asahi-dev-env
-```
-
-If the branch already exists, use this instead of `git switch -c`:
-
-```bash
-git switch feat/fedora-asahi-dev-env
-```
-
-Place this document at:
-
-```text
-~/src/config/docs/fedora-asahi-development-setup.md
-```
-
-Commit only the durable setup document. Do not add the audit report:
-
-```bash
-git add docs/fedora-asahi-development-setup.md
-git diff --cached --check
-git diff --cached
-git commit -m "docs: document Fedora Asahi environment setup"
-```
-
-Optional terminal-bell evaluation: first open an isolated Kitty window and run
-the bell test described above.
-
-```bash
-kitty -o enable_audio_bell=no
-```
-
-If that window is silent and the Kitty-only policy is preferred, edit the
-current live Kitty file without overwriting any file that may now exist.
-
-```bash
-mkdir -p ~/.config/kitty
-${EDITOR:-nano} ~/.config/kitty/kitty.conf
-```
-
-Add or update this directive:
-
-```conf
-enable_audio_bell no
-```
-
-Reload Kitty with `Ctrl+Shift+F5`, or restart Kitty, and test with:
-
-```bash
-printf '\a'
-```
-
-This live file is temporary. Before symlink deployment, the bootstrap process
-must back it up explicitly. Add the directive to the final tracked Kitty common
-configuration only after the policy has been selected.
-
-Rollback: remove only the added directive and reload Kitty. Do not delete the
-file if it contains any unrelated setting.
-
-Observed repository state after this phase:
-
-```text
-Branch: feat/fedora-asahi-dev-env
-Commit: c12a5d3 docs: document Fedora Asahi environment setup
-```
-
-The terminal-bell option remains deferred because no physical test result has
-been recorded yet.
-
-### Phase 2 - Query package availability (`completed`)
-
-Do not install anything yet. Query Fedora 44 aarch64 repositories for candidate packages:
+Inspect availability, then review the proposed transaction before confirming:
 
 ```bash
 dnf info \
-  zellij \
-  starship \
-  zsh-autosuggestions \
-  zsh-syntax-highlighting \
-  fzf \
-  zoxide \
-  eza \
-  neovim
+  kitty zsh git ripgrep curl tar gzip xz coreutils findutils gawk fontconfig \
+  zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza \
+  fcitx5 fcitx5-configtool fcitx5-gtk fcitx5-hangul fcitx5-qt
 ```
-
-Record current environment and command availability:
-
-```bash
-printf 'SHELL=%s\nTERM=%s\nSESSION=%s\n' \
-  "$SHELL" "$TERM" "$XDG_SESSION_TYPE"
-
-command -v \
-  kitty zsh git rg \
-  zellij starship fzf zoxide eza nvim || true
-
-git -C ~/src/config status --short --branch
-```
-
-Stop condition: if Fedora does not provide Zellij or Starship, do not add a COPR or execute an installation script automatically. Compare the official prebuilt binary, Cargo, and external-repository options first.
-
-Observed Fedora 44 aarch64 results:
-
-| Package | Version | Repository | Decision |
-|---|---:|---|---|
-| `zsh-autosuggestions` | 0.7.1-4.fc44 | Fedora | install in Phase 3 |
-| `zsh-syntax-highlighting` | 0.8.0-7.fc44 | Fedora | install in Phase 3 |
-| `fzf` | 0.74.2-1.fc44 | updates | install in Phase 3 |
-| `zoxide` | 0.9.8-2.fc44 | Fedora | install in Phase 3 |
-| `eza` | 0.23.5-1.fc44 | updates | install in Phase 3 |
-| `neovim` | 0.12.4-3.fc44 | updates | defer until the shell is stable |
-| `starship` | no match in enabled repositories | - | compare external options in Phase 4 |
-| `zellij` | no match in enabled repositories | - | compare external options in Phase 4 |
-
-At the time of the query, only `kitty`, `zsh`, `git`, and `rg` from this toolset
-were present on `PATH`.
-
-Repository hygiene check:
-
-```text
-?? docs/SETUP.md
-?? docs/fedora-asahi-dotfiles-audit.md
-```
-
-Both are intentionally excluded from Git. Confirm that the canonical English
-document is tracked, then move these two untracked artifacts outside the
-repository rather than deleting them without inspection.
-
-### Phase 3 - Install Fedora-packaged shell dependencies (`completed`)
-
-The five approved packages were installed before the first repository-only
-implementation pass. Neovim remained separate. The reproducible installation
-command was:
 
 ```bash
 sudo dnf install \
-  zsh-autosuggestions \
-  zsh-syntax-highlighting \
-  fzf \
-  zoxide \
-  eza
+  kitty zsh git ripgrep curl tar gzip xz coreutils findutils gawk fontconfig \
+  zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza \
+  fcitx5 fcitx5-configtool fcitx5-gtk fcitx5-hangul fcitx5-qt
 ```
 
-The exact installed RPMs and plugin paths are recorded under **Completed work**.
-Verification must show all five RPMs, readable plugin files, and commands for
-`fzf`, `zoxide`, and `eza`.
+Stop if DNF proposes removals, third-party replacements, or unrelated
+software. Do not add an unreviewed COPR for Starship or Zellij and never pipe a
+remote installer into a shell.
 
-Stop if the transaction proposes removing packages, replacing Fedora packages
-with third-party builds, or adding Neovim, Starship, or Zellij. Review a new
-transaction separately instead of expanding this phase.
-
-Rollback: use the recorded package-manager transaction and remove only packages
-that transaction added. Never remove a package that existed before the setup or
-is now required by another package.
-
-### Phase 4 - Decide external binaries and the Nerd Font (`planned`)
-
-Starship and Zellij were not available from the currently enabled Fedora or
-Fedora Asahi repositories. Do not add another COPR automatically.
-
-Preferred approach: install version-pinned, checksum-verified upstream aarch64
-Linux binaries into `~/.local/bin`. This requires no root access, does not grant
-an external repository ongoing package-manager trust, and can be rolled back by
-removing two explicit files. The tradeoff is that updates are manual and must
-be documented.
-
-Release candidates observed on 2026-08-16:
-
-| Tool | Candidate | Asset |
-|---|---:|---|
-| Starship | 1.26.0 | `starship-aarch64-unknown-linux-musl.tar.gz` |
-| Zellij | 0.44.3 | `zellij-aarch64-unknown-linux-musl.tar.gz` |
-
-Alternatives:
-
-- Starship's Fedora instructions use the third-party `atim/starship` COPR.
-- Both projects can be installed with Cargo, at the cost of a Rust toolchain and
-  local compilation.
-- Piping a remote installation script directly into a shell is convenient but
-  less auditable and is not the preferred reproducible path.
-
-Do not install either binary until the exact release URLs, upstream checksum
-files, destination, update procedure, and rollback command have been reviewed.
-Select and install the Nerd Font in the same phase so prompt glyphs can be
-tested immediately.
-
-### Phase 5 - Refactor inside the repository only (`applied`)
-
-The first pass on `feat/fedora-asahi-dev-env` does the following:
-
-- Adds repository working rules in `AGENTS.md`.
-- Creates concise shared, Fedora/Wayland, and macOS Kitty files.
-- Keeps Kitty's default `Ctrl+Shift+C/V` and adds no pane or tab mappings.
-- Creates bare Zsh configuration with native completion and Emacs line editing.
-- Guards Fedora plugins, fzf key bindings, zoxide, eza, and the future Starship
-  initialization point so the shell remains usable when optional tools are absent.
-- Sources syntax highlighting last.
-- Preserves all legacy files unchanged.
-- Leaves Starship, Zellij, Nerd Font, Neovim, deployment, bell policy, and the
-  login shell deferred.
-
-No home-directory links, package operations, external downloads, or login-shell
-changes belong in this phase.
-
-Run repository validation from the repository root:
+Verify packages and Fedora Zsh integration paths fail-closed:
 
 ```bash
-# Every Zsh file, including preserved legacy references, must parse.
-while IFS= read -r zsh_file; do
-  zsh -n "$zsh_file" || exit 1
-done < <(find zsh -type f -print | sort)
-
-# Kitty 0.47.1 must parse the Fedora entry point without warnings.
-kitty +runpy '
-from kitty.config import load_config
-path = "kitty/kitty.conf"
-bad_lines = []
-load_config(path, accumulate_bad_lines=bad_lines)
-print(f"bad_lines={len(bad_lines)}")
-raise SystemExit(bool(bad_lines))
-' 2>&1
-
-# These checks should print no matches.
-rg -n '/Users|/opt/homebrew' \
-  kitty/kitty.conf kitty/common.conf kitty/linux.conf
-
-rg -n -i \
-  'ctrl\+space|cmd\+[cv]|alt\+(left|right)|ctrl\+g|neighboring_window|goto_tab|launch.*split' \
-  kitty/kitty.conf kitty/common.conf kitty/linux.conf
-
-# Legacy references must remain unchanged, and whitespace must be clean.
-git diff --exit-code -- kitty/work zsh/work kitty/kitty.macos.conf
-git diff --check
-
-# Review every untracked path; no generated private state may appear.
-git status --short --untracked-files=all
+(
+  set -euo pipefail
+  rpm -q \
+    kitty zsh git ripgrep curl tar gzip xz coreutils findutils gawk fontconfig \
+    zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza \
+    fcitx5 fcitx5-configtool fcitx5-gtk fcitx5-hangul fcitx5-qt
+  rpm -ql fzf | rg '/(key-bindings\.zsh|_fzf)$'
+  test -r /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+  test -r /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+)
 ```
 
-Expected results: every Zsh command exits zero; Kitty prints only
-`bad_lines=0`; both `rg` commands and the legacy `git diff` print nothing;
-`git diff --check` exits zero; status lists only the intended files in this
-phase. The status must not contain `.zsh_history`, `.zcompdump`, `.env`, cache
-directories, credentials, tokens, SSH files, or an audit report.
+Any missing package or path makes the block fail before later checks. Fedora's
+fzf package provides `key-bindings.zsh` and an `_fzf` completion function;
+native Zsh completion discovers `_fzf`.
 
-Stop on any parser warning, unexpected path, forbidden binding, legacy diff,
-whitespace error, or unexplained status entry.
+Configure Fcitx5 as KDE's input method, open `fcitx5-configtool`, add Hangul,
+and keep `Ctrl+Space` as its trigger. Log out and back in after changing the
+input-method service. Do not add a competing binding to Kitty, Zsh, or Zellij.
 
-Observed on 2026-08-16:
+## 4. Pinned user-local artifacts and Meslo font
 
-- All nine Zsh files, including the two legacy files, passed `zsh -n`.
-- Kitty 0.47.1 parsed `kitty/kitty.conf` with `bad_lines=0` and no warnings.
-- Effective Kitty settings retained URL detection, the `monospace` fallback,
-  Wayland, and default `Ctrl+Shift+C/V`; Ctrl+Space, Alt+Left, and Ctrl+G had no
-  Kitty action.
-- An isolated PTY-backed Zsh load with `HISTFILE=/dev/null` confirmed native
-  Emacs bindings, fzf Ctrl+T, eza aliases, zoxide, autosuggestions, syntax
-  highlighting, and the fallback prompt.
-- Forbidden-path, shortcut-ownership, private-state, and legacy-diff checks
-  produced no matches. `git diff --check` passed.
-- Repository validation alone does not physically verify settings; the separate
-  user-verified Phase 6 results are recorded below.
+These values are the trust boundary. Change a version, URL, archive checksum,
+binary checksum, and validation expectation together.
 
-Rollback before deployment: revert the eventual branch commit, or—while still
-uncommitted—remove only the exact new files listed in this phase and restore
-only `README.md` and this document after reviewing their diffs. No live home
-configuration is affected.
+| Artifact | Official URL | Pinned SHA-256 |
+|---|---|---|
+| Starship 1.26.0 archive | <https://github.com/starship/starship/releases/download/v1.26.0/starship-aarch64-unknown-linux-musl.tar.gz> | `dc30189378d2f2e287384e8a692d3f95ad1df64cf0e8c36aa9201516028aed6b` |
+| Extracted Starship binary | Member `starship` of the archive above | `c5a87221f11a7cc36fa2fa4c31dea542457bf08ec825d5c06181008a0666e952` |
+| Zellij 0.44.3 archive | <https://github.com/zellij-org/zellij/releases/download/v0.44.3/zellij-aarch64-unknown-linux-musl.tar.gz> | `15e6534d42644d66973d136c590c49739dcfd6a1a2a0d3d917973f16c81b45fb` |
+| Extracted Zellij binary | Member `zellij` of the archive above | `439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0` |
+| Meslo 3.5.0 archive | <https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/Meslo.tar.xz> | `24cfe8148aeb600891f1d81180e77ecc967a814cde75dc7e63ec5bc2b0ab3eef` |
 
-### Phase 6 - Test without changing live home configuration (`completed, user-verified`)
+Official supporting files:
 
-Launch a new Kitty window that uses both proposed repository profiles:
+- Zellij binary checksum: <https://github.com/zellij-org/zellij/releases/download/v0.44.3/zellij-aarch64-unknown-linux-musl.sha256sum>
+- Nerd Fonts manifest: <https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/SHA-256.txt>
+
+The Starship binary checksum was derived from the archive's sole member only
+after the archive checksum succeeded. An installed executable is not a trust
+source.
+
+### Private temporary storage
+
+Run the artifact blocks in the same Bash process so `artifact_tmp` remains
+defined:
 
 ```bash
-HISTFILE=/dev/null \
-ZDOTDIR="$HOME/src/config/zsh" \
-kitty --config "$HOME/src/config/kitty/kitty.conf" /usr/bin/zsh -d
+artifact_tmp=$(umask 077; mktemp -d -p /tmp fedora-asahi-artifacts.XXXXXXXX)
+mkdir "$artifact_tmp/starship" "$artifact_tmp/zellij" "$artifact_tmp/meslo"
+printf 'artifact workspace: %s\n' "$artifact_tmp"
 ```
 
-- `HISTFILE=/dev/null` prevents this isolated test from writing command history.
-- `ZDOTDIR` points Zsh to the proposed repository configuration.
-- `/usr/bin/zsh -d` skips global Zsh startup files while still loading the proposed
-  interactive `.zshrc`.
-- Closing the test Kitty window is the rollback.
+Stop if either command fails. Do not substitute a predictable path.
 
-User-verified results:
+### Existing-install verification
 
-- The proposed Kitty configuration launched successfully.
-- The proposed Bare Zsh profile loaded successfully.
-- `HISTFILE=/dev/null` prevented persistent test history.
-- Emacs `Ctrl+A` and `Ctrl+E` line-editing bindings worked.
-- `Ctrl+C` interrupted the foreground command.
-- Native Zsh completion worked.
-- Autosuggestions and syntax highlighting worked.
-- fzf `Ctrl+R` history search and `Ctrl+T` file selection worked.
-- zoxide initialization and navigation worked.
-- Guarded eza aliases were available.
-- Fcitx5 retained `Ctrl+Space`, and Hangul input worked.
-- Kitty retained `Ctrl+Shift+C/V` clipboard behavior.
-- Kitty URL detection worked.
+If a destination exists, do not run its installation block. Verify the exact
+regular non-symlink file before executing it:
 
-Terminal bell policy, macOS runtime behavior, Starship, Zellij, Nerd Font,
-Neovim, symlink deployment, and the login-shell change remain deferred or
-unverified.
+```bash
+(
+  set -euo pipefail
+  starship_bin="$HOME/.local/bin/starship"
+  [[ -f $starship_bin && ! -L $starship_bin && -x $starship_bin ]]
+  printf '%s  %s\n' \
+    'c5a87221f11a7cc36fa2fa4c31dea542457bf08ec825d5c06181008a0666e952' \
+    "$starship_bin" | sha256sum --check --strict
+  starship_version=$("$starship_bin" --version | sed -n '1p')
+  [[ $starship_version == 'starship 1.26.0' ]]
+  printf '%s\n' "$starship_version"
+)
+```
 
-Rollback: close the test Kitty window.
+```bash
+(
+  set -euo pipefail
+  zellij_bin="$HOME/.local/bin/zellij"
+  [[ -f $zellij_bin && ! -L $zellij_bin && -x $zellij_bin ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$zellij_bin" | sha256sum --check --strict
+  zellij_version=$("$zellij_bin" --version)
+  [[ $zellij_version == 'zellij 0.44.3' ]]
+  printf '%s\n' "$zellij_version"
+)
+```
 
-### Phase 7 - Deploy symlinks (`planned`)
+Expected results are checksum `OK` messages and pinned versions. Stop on a
+missing file, symlink, type mismatch, checksum mismatch, or version mismatch.
 
-The bootstrap script must default to `--dry-run` and meet these requirements:
+### Install Starship 1.26.0
 
-- Use an explicit target allowlist.
-- Refuse to overwrite an existing regular file.
-- Back up each target individually with a timestamp.
-- Treat an already-correct symlink as success.
-- Provide `--check` behavior.
-- Roll back only links created by the script.
-- Never run a package manager or `chsh`.
+Use this only when `~/.local/bin/starship` is absent:
 
-Expected links:
+```bash
+(
+  set -euo pipefail
+  : "${artifact_tmp:?Prepare private temporary storage first}"
+  archive="$artifact_tmp/starship-aarch64-unknown-linux-musl.tar.gz"
+  extracted="$artifact_tmp/starship/starship"
+  destination="$HOME/.local/bin/starship"
+
+  [[ ! -e $destination && ! -L $destination ]]
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --output "$archive" \
+    'https://github.com/starship/starship/releases/download/v1.26.0/starship-aarch64-unknown-linux-musl.tar.gz'
+  printf '%s  %s\n' \
+    'dc30189378d2f2e287384e8a692d3f95ad1df64cf0e8c36aa9201516028aed6b' \
+    "$archive" | sha256sum --check --strict
+
+  [[ $(tar -tzf "$archive") == starship ]]
+  tar -xzf "$archive" -C "$artifact_tmp/starship" -- starship
+  [[ -f $extracted && ! -L $extracted && -x $extracted ]]
+  printf '%s  %s\n' \
+    'c5a87221f11a7cc36fa2fa4c31dea542457bf08ec825d5c06181008a0666e952' \
+    "$extracted" | sha256sum --check --strict
+  [[ $("$extracted" --version | sed -n '1p') == 'starship 1.26.0' ]]
+
+  mkdir -p "$HOME/.local/bin"
+  [[ ! -e $destination && ! -L $destination ]]
+  install -m 0755 "$extracted" "$destination"
+  [[ -f $destination && ! -L $destination && -x $destination ]]
+  printf '%s  %s\n' \
+    'c5a87221f11a7cc36fa2fa4c31dea542457bf08ec825d5c06181008a0666e952' \
+    "$destination" | sha256sum --check --strict
+)
+```
+
+The archive must report `OK` before `tar` inspects or extracts it. The binary
+must report `OK` before either copy is executed.
+
+### Install Zellij 0.44.3
+
+Use this only when `~/.local/bin/zellij` is absent:
+
+```bash
+(
+  set -euo pipefail
+  : "${artifact_tmp:?Prepare private temporary storage first}"
+  archive="$artifact_tmp/zellij-aarch64-unknown-linux-musl.tar.gz"
+  extracted="$artifact_tmp/zellij/zellij"
+  destination="$HOME/.local/bin/zellij"
+
+  [[ ! -e $destination && ! -L $destination ]]
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --output "$archive" \
+    'https://github.com/zellij-org/zellij/releases/download/v0.44.3/zellij-aarch64-unknown-linux-musl.tar.gz'
+  printf '%s  %s\n' \
+    '15e6534d42644d66973d136c590c49739dcfd6a1a2a0d3d917973f16c81b45fb' \
+    "$archive" | sha256sum --check --strict
+
+  [[ $(tar -tzf "$archive") == zellij ]]
+  tar -xzf "$archive" -C "$artifact_tmp/zellij" -- zellij
+  [[ -f $extracted && ! -L $extracted && -x $extracted ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$extracted" | sha256sum --check --strict
+  [[ $("$extracted" --version) == 'zellij 0.44.3' ]]
+
+  mkdir -p "$HOME/.local/bin"
+  [[ ! -e $destination && ! -L $destination ]]
+  install -m 0755 "$extracted" "$destination"
+  [[ -f $destination && ! -L $destination && -x $destination ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$destination" | sha256sum --check --strict
+)
+```
+
+Do not trust a self-reported version until binary identity is verified.
+
+### Install MesloLGS Nerd Font Mono 3.5.0
+
+Install only these faces:
 
 ```text
-~/.config/kitty/kitty.conf  -> ~/src/config/kitty/kitty.conf
-~/.config/zellij/config.kdl -> ~/src/config/zellij/config.kdl
-~/.config/starship.toml     -> ~/src/config/starship/starship.toml
-~/.zshrc                    -> ~/src/config/zsh/.zshrc
+MesloLGSNerdFontMono-Regular.ttf
+MesloLGSNerdFontMono-Bold.ttf
+MesloLGSNerdFontMono-Italic.ttf
+MesloLGSNerdFontMono-BoldItalic.ttf
 ```
 
-### Phase 8 - Broader physical verification (`partially completed`)
-
-Phase 6 user-verified Fcitx5 `Ctrl+Space`, Hangul input, Kitty clipboard
-behavior, URL detection, and the proposed Kitty and Zsh profiles. These broader
-items remain unverified or deferred:
-
-- Confirm that Apple Command arrives as Super and Option as Alt.
-- Test KDE `Meta+V`, Overview, screenshots, and virtual desktops.
-- Test Kitty font-size controls.
-- Select and test the terminal bell policy.
-- Test the macOS profile on macOS.
-- Test Starship, Zellij, Nerd Font, and Neovim after their deferred phases.
-- Test symlink deployment only after target inspection and backups are approved.
-- Compare readability, smoothness, and battery use before and after enabling transparency.
-
-Do not mark an item verified merely because its configuration parses.
-
-### Phase 9 - Finalize the branch (`planned`)
-
-After repository validation and physical testing, and only with explicit
-approval to stage and commit:
+This block removes only its newly published directory if validation fails:
 
 ```bash
-cd ~/src/config
+(
+  set -euo pipefail
+  : "${artifact_tmp:?Prepare private temporary storage first}"
+  archive="$artifact_tmp/Meslo.tar.xz"
+  extract_dir="$artifact_tmp/meslo"
+  font_parent="$HOME/.local/share/fonts"
+  font_dir="$font_parent/MesloLGSNerdFontMono"
+  stage_dir=''
+  published=0
+
+  cleanup_meslo() {
+    operation_status=$?
+    trap - EXIT
+    if (( operation_status != 0 )); then
+      if (( published == 1 )); then
+        [[ $font_dir == "$HOME/.local/share/fonts/MesloLGSNerdFontMono" ]]
+        [[ -d $font_dir && ! -L $font_dir ]]
+        rm -- \
+          "$font_dir/MesloLGSNerdFontMono-Regular.ttf" \
+          "$font_dir/MesloLGSNerdFontMono-Bold.ttf" \
+          "$font_dir/MesloLGSNerdFontMono-Italic.ttf" \
+          "$font_dir/MesloLGSNerdFontMono-BoldItalic.ttf"
+        rmdir -- "$font_dir"
+      elif [[ -n $stage_dir && -d $stage_dir && ! -L $stage_dir ]]; then
+        rm -rf -- "$stage_dir"
+      fi
+    fi
+    exit "$operation_status"
+  }
+  trap cleanup_meslo EXIT
+
+  [[ ! -e $font_dir && ! -L $font_dir ]]
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --output "$archive" \
+    'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/Meslo.tar.xz'
+  printf '%s  %s\n' \
+    '24cfe8148aeb600891f1d81180e77ecc967a814cde75dc7e63ec5bc2b0ab3eef' \
+    "$archive" | sha256sum --check --strict
+
+  archive_members=$(tar -tJf "$archive")
+  for font_file in \
+    MesloLGSNerdFontMono-Regular.ttf \
+    MesloLGSNerdFontMono-Bold.ttf \
+    MesloLGSNerdFontMono-Italic.ttf \
+    MesloLGSNerdFontMono-BoldItalic.ttf; do
+    [[ $(printf '%s\n' "$archive_members" | \
+      awk -v name="$font_file" \
+      '$0 == name { n++ } END { print n + 0 }') == 1 ]]
+  done
+
+  tar -xJf "$archive" -C "$extract_dir" -- \
+    MesloLGSNerdFontMono-Regular.ttf \
+    MesloLGSNerdFontMono-Bold.ttf \
+    MesloLGSNerdFontMono-Italic.ttf \
+    MesloLGSNerdFontMono-BoldItalic.ttf
+
+  mkdir -p "$font_parent"
+  stage_dir=$(mktemp -d "$font_parent/.MesloLGSNerdFontMono.XXXXXXXX")
+  for font_file in \
+    MesloLGSNerdFontMono-Regular.ttf \
+    MesloLGSNerdFontMono-Bold.ttf \
+    MesloLGSNerdFontMono-Italic.ttf \
+    MesloLGSNerdFontMono-BoldItalic.ttf; do
+    [[ -f $extract_dir/$font_file && ! -L $extract_dir/$font_file ]]
+    install -m 0644 "$extract_dir/$font_file" "$stage_dir/$font_file"
+  done
+
+  [[ ! -e $font_dir && ! -L $font_dir ]]
+  mv -- "$stage_dir" "$font_dir"
+  published=1
+  stage_dir=''
+  fc-cache -f "$font_dir"
+  for font_style in Regular Bold Italic 'Bold Italic'; do
+    [[ $(fc-match -f '%{family[0]}' \
+      "MesloLGS Nerd Font Mono:style=$font_style") == \
+      'MesloLGS Nerd Font Mono' ]]
+    [[ $(fc-match -f '%{style[0]}' \
+      "MesloLGS Nerd Font Mono:style=$font_style") == "$font_style" ]]
+  done
+  trap - EXIT
+)
+```
+
+Expected results are archive `OK`, four unique selected members, and four
+matching fontconfig styles. Stop on any mismatch. If the final directory
+exists, verify or update it instead of running this first-install block.
+
+Remove only the recorded temporary workspace after all artifacts succeed:
+
+```bash
+(
+  set -euo pipefail
+  : "${artifact_tmp:?No artifact workspace is recorded}"
+  [[ -d $artifact_tmp && ! -L $artifact_tmp ]]
+  case $artifact_tmp in
+    /tmp/fedora-asahi-artifacts.*) ;;
+    *) printf 'STOP: unexpected temporary path: %s\n' "$artifact_tmp" >&2
+       exit 1 ;;
+  esac
+  rm -rf -- "$artifact_tmp"
+)
+unset artifact_tmp
+```
+
+## 5. Dotfiles repository
+
+Clone into the path used below:
+
+```bash
+mkdir -p "$HOME/src"
+git clone https://github.com/mrjng/config.git "$HOME/src/config"
+cd "$HOME/src/config"
 git status --short --branch
-git diff --check
-git add \
-  AGENTS.md \
-  README.md \
-  docs/fedora-asahi-development-setup.md \
-  kitty/kitty.conf kitty/common.conf kitty/linux.conf kitty/macos.conf \
-  zsh/.zshrc zsh/conf.d
-git diff --cached
-git commit -m "feat: add Fedora Asahi terminal environment"
 ```
 
-Do not use `git add --all`. Review `git status --short --untracked-files=all`
-and the explicit path list first so an audit report or private state cannot be
-staged accidentally.
+If `$HOME/src/config` exists, do not clone over it. Inspect its remote, branch,
+and status; use section 10 only after unexplained changes are resolved.
 
-Merge only after the deployed configuration has passed Phase 8:
+Active Fedora files:
+
+```text
+kitty/kitty.conf
+kitty/common.conf
+kitty/linux.conf
+kitty/work/current-theme.conf
+zsh/.zshrc
+zsh/conf.d/*.zsh
+starship/starship.toml
+zellij/config.kdl
+```
+
+`zsh/.zshrc` adds `~/.local/bin` before integrations and adds `~/bin` only
+when it exists. It preserves PATH entries, avoids duplicates, and never assigns
+to Zsh's special lowercase `path`. Zellij resolves `default_shell "zsh"`
+through PATH and does not auto-start from Zsh.
+
+## 6. Existing-target inspection and preservation
+
+Inspect every target again after cloning:
 
 ```bash
-git switch main
-git merge --ff-only feat/fedora-asahi-dev-env
+for target in \
+  "$HOME/.config/kitty/kitty.conf" \
+  "$HOME/.config/kitty/common.conf" \
+  "$HOME/.config/kitty/linux.conf" \
+  "$HOME/.config/kitty/work/current-theme.conf" \
+  "$HOME/.config/starship.toml" \
+  "$HOME/.config/zellij/config.kdl" \
+  "$HOME/.zshrc"; do
+  if [[ -e $target || -L $target ]]; then
+    ls -ld -- "$target"
+  else
+    printf 'absent: %s\n' "$target"
+  fi
+done
 ```
 
-### Phase 10 - Change the login shell (`optional and last`)
-
-Consider this only after Zsh has worked reliably inside Kitty for several days:
+Kitty, Starship, and Zsh require absent targets. For configuration worth
+keeping, create one private backup directory and move each reviewed target into
+it individually:
 
 ```bash
-chsh -s /usr/bin/zsh
+if [[ -e $HOME/.config || -L $HOME/.config ]]; then
+  [[ -d $HOME/.config && ! -L $HOME/.config ]]
+else
+  mkdir -- "$HOME/.config"
+fi
+backup_root=$(umask 077; mktemp -d "$HOME/.config/dotfiles-backup.XXXXXXXX")
+printf 'record this backup directory: %s\n' "$backup_root"
 ```
 
-The change takes effect in a new login session. Roll back to Bash with:
+Example for a reviewed regular `.zshrc`:
 
 ```bash
-chsh -s /bin/bash
+[[ -f $HOME/.zshrc && ! -L $HOME/.zshrc ]]
+[[ ! -e $backup_root/zshrc && ! -L $backup_root/zshrc ]]
+mv -- "$HOME/.zshrc" "$backup_root/zshrc"
 ```
 
-Keeping Bash as the login shell and starting Zsh only inside Kitty remains a valid configuration.
+Use a distinct name for each target. Do not run a broad recursive move or move
+an existing directory merely to make deployment pass. Record the backup path
+for section 11.
 
-## 9. Starship configuration plan
+Handle `~/.config/zellij/config.kdl` separately:
 
-Start from the official Catppuccin Powerline preset, then reduce it to the information that is useful in daily work.
+- If absent, use clean Zellij deployment.
+- If it is a reviewed regular non-symlink file, use existing-file preservation.
+- For a directory, symlink, dangling symlink, or unexpected type, stop and
+  resolve it manually. Unknown configuration is user data, not disposable state.
 
-Show by default:
+## 7. Deployment
 
-- Current directory
-- Git branch and working-tree state
-- Language/runtime versions only inside matching projects
-- Duration only for commands exceeding a threshold
-- Previous command success or failure
+### Kitty, Starship, and Zsh
 
-Hide by default:
+Kitty resolves relative includes beside the deployed entry point. Deploy the
+complete layout:
 
-- Local username and hostname
-- Always-visible operating-system icons
-- Runtimes unrelated to the current project
-- Cloud or container modules not currently in use
+```text
+~/.config/kitty/kitty.conf              -> ~/src/config/kitty/kitty.conf
+~/.config/kitty/common.conf             -> ~/src/config/kitty/common.conf
+~/.config/kitty/linux.conf              -> ~/src/config/kitty/linux.conf
+~/.config/kitty/work/current-theme.conf -> ~/src/config/kitty/work/current-theme.conf
+```
 
-Show username and hostname conditionally in SSH sessions. Use `starship timings` after configuration to find slow modules.
+Create links only after every destination is absent:
 
-Zsh integration point:
+```bash
+(
+  set -euo pipefail
+  repo_dir="$HOME/src/config"
+  for source_file in \
+    "$repo_dir/kitty/kitty.conf" \
+    "$repo_dir/kitty/common.conf" \
+    "$repo_dir/kitty/linux.conf" \
+    "$repo_dir/kitty/work/current-theme.conf" \
+    "$repo_dir/starship/starship.toml" \
+    "$repo_dir/zsh/.zshrc"; do
+    [[ -f $source_file && ! -L $source_file ]]
+  done
+  for destination in \
+    "$HOME/.config/kitty/kitty.conf" \
+    "$HOME/.config/kitty/common.conf" \
+    "$HOME/.config/kitty/linux.conf" \
+    "$HOME/.config/kitty/work/current-theme.conf" \
+    "$HOME/.config/starship.toml" \
+    "$HOME/.zshrc"; do
+    [[ ! -e $destination && ! -L $destination ]]
+  done
+
+  if [[ -e $HOME/.config || -L $HOME/.config ]]; then
+    [[ -d $HOME/.config && ! -L $HOME/.config ]]
+  else
+    mkdir -- "$HOME/.config"
+  fi
+  if [[ -e $HOME/.config/kitty || -L $HOME/.config/kitty ]]; then
+    [[ -d $HOME/.config/kitty && ! -L $HOME/.config/kitty ]]
+  else
+    mkdir -- "$HOME/.config/kitty"
+  fi
+  if [[ -e $HOME/.config/kitty/work || -L $HOME/.config/kitty/work ]]; then
+    [[ -d $HOME/.config/kitty/work && ! -L $HOME/.config/kitty/work ]]
+  else
+    mkdir -- "$HOME/.config/kitty/work"
+  fi
+  ln -s "$repo_dir/kitty/kitty.conf" "$HOME/.config/kitty/kitty.conf"
+  ln -s "$repo_dir/kitty/common.conf" "$HOME/.config/kitty/common.conf"
+  ln -s "$repo_dir/kitty/linux.conf" "$HOME/.config/kitty/linux.conf"
+  ln -s "$repo_dir/kitty/work/current-theme.conf" \
+    "$HOME/.config/kitty/work/current-theme.conf"
+  ln -s "$repo_dir/starship/starship.toml" "$HOME/.config/starship.toml"
+  ln -s "$repo_dir/zsh/.zshrc" "$HOME/.zshrc"
+)
+```
+
+If this stops after creating some links, inspect them and use exact-link
+rollback in section 11 before retrying.
+
+### Zellij clean target
+
+Use only when `~/.config/zellij/config.kdl` is absent:
+
+```bash
+(
+  set -euo pipefail
+  source_file="$HOME/src/config/zellij/config.kdl"
+  config_root="$HOME/.config"
+  config_dir="$config_root/zellij"
+  destination="$config_dir/config.kdl"
+  zellij_bin="$HOME/.local/bin/zellij"
+  [[ -f $source_file && ! -L $source_file ]]
+  [[ ! -e $destination && ! -L $destination ]]
+  [[ -f $zellij_bin && ! -L $zellij_bin && -x $zellij_bin ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$zellij_bin" | sha256sum --check --strict
+  ZELLIJ_CONFIG_FILE="$source_file" "$zellij_bin" setup --check
+
+  if [[ -e $config_root || -L $config_root ]]; then
+    [[ -d $config_root && ! -L $config_root ]]
+  else
+    mkdir -- "$config_root"
+  fi
+  if [[ -e $config_dir || -L $config_dir ]]; then
+    [[ -d $config_dir && ! -L $config_dir ]]
+  else
+    mkdir -- "$config_dir"
+  fi
+  [[ ! -e $destination && ! -L $destination ]]
+  ln -s "$source_file" "$destination"
+  [[ $(readlink -- "$destination") == "$source_file" ]]
+)
+```
+
+Expected result: Zellij reports a well-defined configuration and the target is
+the exact repository symlink. This path creates no backup.
+
+### Zellij existing regular file
+
+Use only after reviewing an existing regular non-symlink config. This records
+its checksum, preserves it in a unique directory, and restores it if deployment
+validation fails:
+
+```bash
+(
+  set -euo pipefail
+  source_file="$HOME/src/config/zellij/config.kdl"
+  config_dir="$HOME/.config/zellij"
+  destination="$config_dir/config.kdl"
+  zellij_bin="$HOME/.local/bin/zellij"
+  backup_dir=''
+  backup_file=''
+  original_moved=0
+
+  restore_existing_zellij() {
+    operation_status=$?
+    trap - EXIT
+    if (( operation_status != 0 && original_moved == 1 )); then
+      if [[ -L $destination ]] && \
+          [[ $(readlink -- "$destination") == "$source_file" ]]; then
+        unlink "$destination"
+      fi
+      if [[ ! -e $destination && ! -L $destination && \
+          -f $backup_file && ! -L $backup_file ]]; then
+        mv -- "$backup_file" "$destination"
+        rmdir -- "$backup_dir"
+      else
+        printf 'STOP: preserved config remains at %s\n' "$backup_file" >&2
+      fi
+    fi
+    exit "$operation_status"
+  }
+  trap restore_existing_zellij EXIT
+
+  [[ -d $config_dir && ! -L $config_dir ]]
+  [[ -f $destination && ! -L $destination ]]
+  [[ -f $source_file && ! -L $source_file ]]
+  [[ -f $zellij_bin && ! -L $zellij_bin && -x $zellij_bin ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$zellij_bin" | sha256sum --check --strict
+
+  original_sha256=$(sha256sum -- "$destination" | awk '{print $1}')
+  backup_dir=$(umask 077; mktemp -d "$config_dir/repository-backup.XXXXXXXX")
+  backup_file="$backup_dir/config.kdl"
+  mv -- "$destination" "$backup_file"
+  original_moved=1
+  [[ $(sha256sum -- "$backup_file" | awk '{print $1}') == \
+    "$original_sha256" ]]
+
+  ln -s "$source_file" "$destination"
+  [[ $(readlink -- "$destination") == "$source_file" ]]
+  ZELLIJ_CONFIG_FILE="$destination" "$zellij_bin" setup --check
+  printf 'preserved Zellij config: %s\nsha256: %s\n' \
+    "$backup_file" "$original_sha256"
+  trap - EXIT
+)
+```
+
+Record the printed path. Never recursively remove a Zellij config or backup.
+Open a new Kitty window and Zsh after deployment. Do not change the login shell
+yet.
+
+## 8. Automated and physical validation
+
+### Repository and deployed configuration
+
+Run from the repository root:
+
+```bash
+(
+  set -euo pipefail
+  cd "$HOME/src/config"
+  repo_dir="$PWD"
+  starship_bin="$HOME/.local/bin/starship"
+  zellij_bin="$HOME/.local/bin/zellij"
+
+  [[ -f $starship_bin && ! -L $starship_bin && -x $starship_bin ]]
+  printf '%s  %s\n' \
+    'c5a87221f11a7cc36fa2fa4c31dea542457bf08ec825d5c06181008a0666e952' \
+    "$starship_bin" | sha256sum --check --strict
+  [[ -f $zellij_bin && ! -L $zellij_bin && -x $zellij_bin ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$zellij_bin" | sha256sum --check --strict
+
+  [[ $(readlink "$HOME/.config/kitty/kitty.conf") == \
+    "$repo_dir/kitty/kitty.conf" ]]
+  [[ $(readlink "$HOME/.config/kitty/common.conf") == \
+    "$repo_dir/kitty/common.conf" ]]
+  [[ $(readlink "$HOME/.config/kitty/linux.conf") == \
+    "$repo_dir/kitty/linux.conf" ]]
+  [[ $(readlink "$HOME/.config/kitty/work/current-theme.conf") == \
+    "$repo_dir/kitty/work/current-theme.conf" ]]
+  [[ $(readlink "$HOME/.config/starship.toml") == \
+    "$repo_dir/starship/starship.toml" ]]
+  [[ $(readlink "$HOME/.zshrc") == "$repo_dir/zsh/.zshrc" ]]
+  [[ $(readlink "$HOME/.config/zellij/config.kdl") == \
+    "$repo_dir/zellij/config.kdl" ]]
+
+  STARSHIP_CONFIG="$HOME/.config/starship.toml" \
+    "$starship_bin" print-config >/dev/null
+  ZELLIJ_CONFIG_FILE="$HOME/.config/zellij/config.kdl" \
+    "$zellij_bin" setup --check
+
+  zsh_file_list=$(mktemp -p /tmp zsh-validation.XXXXXXXX)
+  trap 'rm -f -- "$zsh_file_list"' EXIT
+  find zsh -type f -print0 | sort -z > "$zsh_file_list"
+  [[ -s $zsh_file_list ]]
+  while IFS= read -r -d '' zsh_file; do
+    zsh -n "$zsh_file"
+  done < "$zsh_file_list"
+  rm -f -- "$zsh_file_list"
+  trap - EXIT
+
+  KITTY_CONFIG_DIRECTORY="$HOME/.config/kitty" kitty +runpy '
+import os
+from kitty.config import load_config
+config_path = os.path.join(os.environ["KITTY_CONFIG_DIRECTORY"], "kitty.conf")
+bad_lines = []
+opts = load_config(config_path, accumulate_bad_lines=bad_lines)
+print(f"bad_lines={len(bad_lines)}")
+print(f"font_family={opts.font_family}")
+print(f"linux_display_server={opts.linux_display_server}")
+if bad_lines:
+    raise SystemExit(1)
+if str(opts.font_family) != "MesloLGS Nerd Font Mono":
+    raise SystemExit(1)
+if str(opts.linux_display_server) != "wayland":
+    raise SystemExit(1)
+'
+
+  for font_style in Regular Bold Italic 'Bold Italic'; do
+    [[ $(fc-match -f '%{family[0]}' \
+      "MesloLGS Nerd Font Mono:style=$font_style") == \
+      'MesloLGS Nerd Font Mono' ]]
+    [[ $(fc-match -f '%{style[0]}' \
+      "MesloLGS Nerd Font Mono:style=$font_style") == "$font_style" ]]
+  done
+)
+```
+
+Expected results are two checksum `OK` messages, successful Starship and
+Zellij parsing, no Zsh syntax failure, Kitty `bad_lines=0`, Wayland, Meslo, and
+four matching font styles. Parser success is not physical proof.
+
+### Fresh-login PATH and command lookup
+
+Do not inherit another shell's PATH. Use a private regular history file and
+start interactive Zsh with exactly the minimal PATH:
+
+```bash
+zsh_test_dir=$(umask 077; mktemp -d -p /tmp zsh-login-test.XXXXXXXX)
+zsh_test_history="$zsh_test_dir/history"
+touch "$zsh_test_history"
+chmod 600 "$zsh_test_history"
+
+env -i \
+  HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" \
+  SHELL=/usr/bin/zsh TERM="${TERM:-xterm-256color}" \
+  PATH=/usr/local/bin:/usr/bin:/bin \
+  HISTFILE="$zsh_test_history" \
+  ZDOTDIR="$HOME/src/config/zsh" \
+  /usr/bin/zsh -d
+```
+
+At the new prompt:
 
 ```zsh
-if command -v starship >/dev/null 2>&1; then
-  eval "$(starship init zsh)"
+print -r -- "$PATH"
+print -l -- ${(s.:.)PATH}
+command -v starship zellij git awk sed
+
+[[ $(print -l -- ${(s.:.)PATH} | \
+  awk -v expected="$HOME/.local/bin" \
+  '$0 == expected { n++ } END { print n + 0 }') == 1 ]]
+if [[ -d $HOME/bin ]]; then
+  [[ $(print -l -- ${(s.:.)PATH} | \
+    awk -v expected="$HOME/bin" \
+    '$0 == expected { n++ } END { print n + 0 }') == 1 ]]
 fi
+[[ $(command -v starship) == "$HOME/.local/bin/starship" ]]
+[[ $(command -v zellij) == "$HOME/.local/bin/zellij" ]]
+for command_name in git awk sed; do
+  (( $+commands[$command_name] ))
+done
+exit
 ```
 
-## 10. Safety rules
+Expected result: `~/.local/bin` appears exactly once, `~/bin` appears exactly
+once when present, Starship and Zellij resolve from `~/.local/bin`, and the
+three system PATH entries remain. Never assign lowercase `path` and never use
+`/dev/null` as an interactive HISTFILE.
 
-- Never commit SSH keys, tokens, credentials, shell history, or private environment variables.
-- Never overwrite a pre-existing home file without inspecting it and creating a targeted backup.
-- Keep package installation separate from dotfile deployment.
-- Do not automate `sudo`, `dnf`, `chsh`, or remote installation scripts without explicit approval.
-- Put only genuinely shared settings in common files; isolate Linux and macOS behavior.
-- Do not commit another generated snapshot of Kitty's complete default configuration.
-- Record validation commands and rollback instructions with each configuration change.
+After exit, remove only the private test files:
 
-## 11. Next checkpoint
+```bash
+[[ -f $zsh_test_history && ! -L $zsh_test_history ]]
+rm -- "$zsh_test_history"
+rmdir -- "$zsh_test_dir"
+unset zsh_test_history zsh_test_dir
+```
 
-Review the first repository-only Kitty and Zsh pass together with the completed
-Phase 6 user-verified results. Decide separately whether any remaining Phase 8
-Linux tests should be performed before deployment planning.
+### Physical checks
 
-Keep Starship, Zellij, the Nerd Font, Neovim, symlink deployment, terminal bell
-policy, and `chsh` deferred until each corresponding decision and rollback plan
-receives explicit approval.
+In a new Kitty window, verify:
 
-## References
+- Regular, bold, italic, and bold-italic text use the intended Meslo faces.
+- Starship and Zellij glyphs are aligned and not clipped.
+- `Ctrl+Space` switches Hangul in plain Zsh and a Zellij pane.
+- `Ctrl+Shift+C/V` copy and paste outside and inside Zellij; use disposable text.
+- A visible URL is detected and opens with the expected desktop handler.
+- Kitty font-size controls, padding, theme, and Wayland title bar work.
+- Zellij can create and close panes and tabs, detach, list sessions, reattach,
+  and exit without leaving an unwanted session.
+- KDE `Meta+V`, Overview, screenshots, and virtual desktops still work.
 
-- Kitty documentation: <https://sw.kovidgoyal.net/kitty/>
-- Zellij user guide: <https://zellij.dev/documentation/>
-- Starship configuration: <https://starship.rs/config/>
-- Starship presets: <https://starship.rs/presets/>
-- Starship releases: <https://github.com/starship/starship/releases>
-- Zsh documentation: <https://zsh.sourceforge.io/Doc/>
-- Zellij releases: <https://github.com/zellij-org/zellij/releases>
-- Fedora packages: <https://packages.fedoraproject.org/>
-- KDE Accessibility and System Bell: <https://docs.kde.org/stable_kf6/en/plasma-desktop/kcontrol/kcmaccess/kcmaccess.pdf>
-- Powerlevel10k support status: <https://github.com/romkatv/powerlevel10k>
-- Oh My Zsh: <https://github.com/ohmyzsh/ohmyzsh>
+Do not enable bell suppression until an audible and visual test selects a policy.
+
+## 9. Optional login-shell change
+
+This is optional and comes only after automated and physical validation. Skip
+it when the account shell is already the intended Zsh.
+
+```bash
+(
+  set -euo pipefail
+  account_name=$(id -un)
+  previous_shell=$(getent passwd "$account_name" | awk -F: '{print $7}')
+  [[ -n $previous_shell ]]
+  zsh_path=$(command -v zsh)
+  [[ $zsh_path == /usr/bin/zsh ]]
+  grep -Fx -- "$zsh_path" /etc/shells
+  printf 'record previous login shell: %s\n' "$previous_shell"
+  printf 'requested login shell: %s\n' "$zsh_path"
+  chsh -s "$zsh_path"
+)
+```
+
+Log out completely and back in. Confirm `SHELL=/usr/bin/zsh`, rerun the
+fresh-login PATH check, and open Kitty and Zellij. If anything fails, restore
+the previously recorded shell using section 11. Never automate `chsh`.
+
+## 10. Updating
+
+Update one layer at a time and validate it before starting another.
+
+### Fedora packages
+
+```bash
+dnf check-update
+sudo dnf upgrade --refresh
+```
+
+Review the transaction. Keep DNF history and do not combine package upgrades
+with artifact replacement, dotfile deployment, or a login-shell change.
+
+### Repository
+
+Deployed symlinks expose repository changes immediately. Require a clean
+worktree and review incoming changes before updating:
+
+```bash
+(
+  set -euo pipefail
+  cd "$HOME/src/config"
+  [[ -z $(git status --short) ]]
+  git fetch origin
+  git log --oneline --decorate HEAD..@{upstream}
+  git diff --stat HEAD..@{upstream}
+)
+```
+
+If acceptable:
+
+```bash
+(
+  set -euo pipefail
+  cd "$HOME/src/config"
+  [[ -z $(git status --short) ]]
+  git merge --ff-only '@{upstream}'
+)
+```
+
+Stop on local changes, an unexpected branch, a non-fast-forward update, or an
+unreviewed configuration change. Repeat section 8 afterward.
+
+### Starship, Zellij, or Meslo
+
+For each release:
+
+1. Read release notes and select the exact Linux `aarch64` asset.
+2. Record the new version, official URL, archive checksum, extracted-binary
+   checksum, and validation expectation before installation.
+3. Download into a new private `mktemp -d` directory.
+4. Verify the archive before listing or extracting members.
+5. Verify an extracted regular non-symlink binary before execution.
+6. Copy the currently verified binary or font directory to a unique backup
+   outside Git; record its path and checksum.
+7. Install the reviewed files and repeat section 8.
+8. Restore the backup immediately if validation fails.
+
+Never derive trust solely from an installed executable, reuse checksums across
+versions, or replace a destination whose identity is unknown.
+
+## 11. Rollback
+
+### Configuration links
+
+Verify every target is still the exact repository symlink before unlinking:
+
+```bash
+(
+  set -euo pipefail
+  repo_dir="$HOME/src/config"
+  [[ $(readlink "$HOME/.config/kitty/kitty.conf") == \
+    "$repo_dir/kitty/kitty.conf" ]]
+  [[ $(readlink "$HOME/.config/kitty/common.conf") == \
+    "$repo_dir/kitty/common.conf" ]]
+  [[ $(readlink "$HOME/.config/kitty/linux.conf") == \
+    "$repo_dir/kitty/linux.conf" ]]
+  [[ $(readlink "$HOME/.config/kitty/work/current-theme.conf") == \
+    "$repo_dir/kitty/work/current-theme.conf" ]]
+  [[ $(readlink "$HOME/.config/starship.toml") == \
+    "$repo_dir/starship/starship.toml" ]]
+  [[ $(readlink "$HOME/.zshrc") == "$repo_dir/zsh/.zshrc" ]]
+
+  unlink "$HOME/.zshrc"
+  unlink "$HOME/.config/starship.toml"
+  unlink "$HOME/.config/kitty/work/current-theme.conf"
+  unlink "$HOME/.config/kitty/linux.conf"
+  unlink "$HOME/.config/kitty/common.conf"
+  unlink "$HOME/.config/kitty/kitty.conf"
+)
+```
+
+If only some links were deployed, verify and unlink those individually. Restore
+reviewed files from the recorded `$backup_root` only into absent targets. For
+example:
+
+```bash
+[[ -f $backup_root/zshrc && ! -L $backup_root/zshrc ]]
+[[ ! -e $HOME/.zshrc && ! -L $HOME/.zshrc ]]
+mv -- "$backup_root/zshrc" "$HOME/.zshrc"
+```
+
+### Zellij clean deployment
+
+Use only when no migration backup exists:
+
+```bash
+(
+  set -euo pipefail
+  config_dir="$HOME/.config/zellij"
+  destination="$config_dir/config.kdl"
+  source_file="$HOME/src/config/zellij/config.kdl"
+  shopt -s nullglob
+  migration_backups=("$config_dir"/repository-backup.*)
+  (( ${#migration_backups[@]} == 0 ))
+  [[ -L $destination ]]
+  [[ $(readlink -- "$destination") == "$source_file" ]]
+  unlink "$destination"
+)
+```
+
+Any matching backup makes this refuse to unlink. Use migrated rollback instead.
+
+### Zellij migrated deployment
+
+Set the exact directory printed during migration:
+
+```bash
+zellij_backup_dir="$HOME/.config/zellij/repository-backup.RECORDED_SUFFIX"
+```
+
+Restore only the preserved regular file into an absent destination:
+
+```bash
+(
+  set -euo pipefail
+  config_dir="$HOME/.config/zellij"
+  destination="$config_dir/config.kdl"
+  source_file="$HOME/src/config/zellij/config.kdl"
+  backup_file="$zellij_backup_dir/config.kdl"
+  [[ $(dirname -- "$zellij_backup_dir") == "$config_dir" ]]
+  [[ $(basename -- "$zellij_backup_dir") == repository-backup.* ]]
+  [[ -d $zellij_backup_dir && ! -L $zellij_backup_dir ]]
+  [[ -f $backup_file && ! -L $backup_file ]]
+  [[ -L $destination ]]
+  [[ $(readlink -- "$destination") == "$source_file" ]]
+  unlink "$destination"
+  [[ ! -e $destination && ! -L $destination ]]
+  mv -- "$backup_file" "$destination"
+  [[ -f $destination && ! -L $destination ]]
+  rmdir -- "$zellij_backup_dir"
+)
+```
+
+Never recursively remove the Zellij config or backup. Stop if any path, type,
+or symlink target differs.
+
+### User-local artifacts
+
+For a failed update, restore the recorded verified backup and repeat section 8.
+For complete binary removal, first ensure no Zellij session or shell depends on
+them, then verify identity before removal:
+
+```bash
+(
+  set -euo pipefail
+  starship_bin="$HOME/.local/bin/starship"
+  zellij_bin="$HOME/.local/bin/zellij"
+  [[ -f $starship_bin && ! -L $starship_bin ]]
+  printf '%s  %s\n' \
+    'c5a87221f11a7cc36fa2fa4c31dea542457bf08ec825d5c06181008a0666e952' \
+    "$starship_bin" | sha256sum --check --strict
+  [[ -f $zellij_bin && ! -L $zellij_bin ]]
+  printf '%s  %s\n' \
+    '439ed44da5df3cd70e578dc4aef5a67dc7b81eabdddec27969d84a6be380b2f0' \
+    "$zellij_bin" | sha256sum --check --strict
+  rm -- "$starship_bin" "$zellij_bin"
+)
+```
+
+Remove Meslo only when its dedicated directory contains exactly the four files
+listed in section 4, all regular non-symlink files, and no unrelated font:
+
+```bash
+(
+  set -euo pipefail
+  font_dir="$HOME/.local/share/fonts/MesloLGSNerdFontMono"
+  expected=$(printf '%s\n' \
+    MesloLGSNerdFontMono-Regular.ttf \
+    MesloLGSNerdFontMono-Bold.ttf \
+    MesloLGSNerdFontMono-Italic.ttf \
+    MesloLGSNerdFontMono-BoldItalic.ttf | sort)
+  installed=$(find "$font_dir" -mindepth 1 -maxdepth 1 \
+    -printf '%f\n' | sort)
+  [[ $installed == "$expected" ]]
+  while IFS= read -r font_file; do
+    [[ -f $font_dir/$font_file && ! -L $font_dir/$font_file ]]
+  done <<< "$expected"
+
+  rm -- \
+    "$font_dir/MesloLGSNerdFontMono-Regular.ttf" \
+    "$font_dir/MesloLGSNerdFontMono-Bold.ttf" \
+    "$font_dir/MesloLGSNerdFontMono-Italic.ttf" \
+    "$font_dir/MesloLGSNerdFontMono-BoldItalic.ttf"
+  rmdir -- "$font_dir"
+  fc-cache -f
+)
+```
+
+Never recursively remove a shared font directory.
+
+Use `dnf history` to identify package transactions. Remove packages only after
+checking that no other software depends on them.
+
+### Login shell
+
+Restore the exact shell recorded before `chsh`, after confirming it is listed
+in `/etc/shells`:
+
+```bash
+previous_shell=/absolute/path/recorded/before/change
+grep -Fx -- "$previous_shell" /etc/shells
+chsh -s "$previous_shell"
+```
+
+The change applies at next login. If Zsh cannot start, use a TTY or another
+administrator account.
+
+## 12. Future automation
+
+A future setup tool should use one machine-readable set of pinned versions,
+URLs, and checksums; default to dry-run; inspect every destination; preserve
+unknown user data in unique backups; validate before publishing; roll back only
+what it created; and never automate `sudo`, DNF confirmation, remote
+download-and-execute, or `chsh`. Implement and validate Fedora and macOS paths
+separately.

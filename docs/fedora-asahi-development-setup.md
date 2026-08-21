@@ -1,10 +1,15 @@
 # Fedora Asahi Terminal Environment Reproduction Guide
 
-Last updated: 2026-08-20
+Last updated: 2026-08-22
 
 Run commands in order and one block at a time. Read each expected result and
 stop condition before continuing. This repository does not install packages,
 deploy configuration, or change the login shell automatically.
+
+Markdown fence labels provide syntax highlighting; they do not select a shell.
+Except where this guide explicitly starts a temporary Bash process, paste
+operational blocks into the current Zsh. The marked Bash processes end with an
+explicit `exit` and contain every variable-dependent operation they own.
 
 ## 1. Scope and resulting stack
 
@@ -34,7 +39,7 @@ login shell.
 
 Confirm the platform before installing anything:
 
-```bash
+```zsh
 (
   set -euo pipefail
   [[ $(uname -m) == aarch64 ]]
@@ -51,7 +56,7 @@ identity is uncertain. The pinned binaries below are Linux `aarch64` builds.
 
 Inspect existing commands and targets without changing them:
 
-```bash
+```zsh
 command -v dnf sudo bash
 
 for target in \
@@ -77,14 +82,14 @@ unexpected file, directory, symlink, or dangling symlink.
 
 Inspect availability, then review the proposed transaction before confirming:
 
-```bash
+```zsh
 dnf info \
   kitty zsh git ripgrep curl tar gzip xz coreutils findutils gawk fontconfig \
   zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza \
   fcitx5 fcitx5-configtool fcitx5-gtk fcitx5-hangul fcitx5-qt
 ```
 
-```bash
+```zsh
 sudo dnf install \
   kitty zsh git ripgrep curl tar gzip xz coreutils findutils gawk fontconfig \
   zsh-autosuggestions zsh-syntax-highlighting fzf zoxide eza \
@@ -97,7 +102,7 @@ remote installer into a shell.
 
 Verify packages and Fedora Zsh integration paths fail-closed:
 
-```bash
+```zsh
 (
   set -euo pipefail
   rpm -q \
@@ -142,13 +147,25 @@ source.
 
 ### Private temporary storage
 
-Run the artifact blocks in the same Bash process so `artifact_tmp` remains
-defined:
+From the current Zsh, start one dedicated Bash process for the complete artifact
+workflow:
+
+```zsh
+bash
+```
+
+Run every `bash` fence from here through the cleanup fence in that Bash process.
+Do not start another shell between them. Prepare its private workspace:
 
 ```bash
-artifact_tmp=$(umask 077; mktemp -d -p /tmp fedora-asahi-artifacts.XXXXXXXX)
-mkdir "$artifact_tmp/starship" "$artifact_tmp/zellij" "$artifact_tmp/meslo"
-printf 'artifact workspace: %s\n' "$artifact_tmp"
+artifact_tmp=$(umask 077; mktemp -d -p /tmp \
+  fedora-asahi-artifacts.XXXXXXXX) || exit 1
+if ! mkdir "$artifact_tmp/starship" "$artifact_tmp/zellij" \
+    "$artifact_tmp/meslo"; then
+  rm -rf -- "$artifact_tmp"
+  exit 1
+fi
+printf 'artifact workspace: %s\n' "$artifact_tmp" || exit 1
 ```
 
 Stop if either command fails. Do not substitute a predictable path.
@@ -371,10 +388,11 @@ Expected results are archive `OK`, four unique selected members, and four
 matching fontconfig styles. Stop on any mismatch. If the final directory
 exists, verify or update it instead of running this first-install block.
 
-Remove only the recorded temporary workspace after all artifacts succeed:
+Remove only the recorded temporary workspace after all artifacts succeed, then
+terminate the dedicated Bash process and return to Zsh:
 
 ```bash
-(
+if (
   set -euo pipefail
   : "${artifact_tmp:?No artifact workspace is recorded}"
   [[ -d $artifact_tmp && ! -L $artifact_tmp ]]
@@ -384,15 +402,20 @@ Remove only the recorded temporary workspace after all artifacts succeed:
        exit 1 ;;
   esac
   rm -rf -- "$artifact_tmp"
-)
-unset artifact_tmp
+); then
+  unset artifact_tmp
+  exit
+else
+  printf 'STOP: artifact workspace cleanup failed\n' >&2
+  exit 1
+fi
 ```
 
 ## 5. Dotfiles repository
 
 Clone into the path used below:
 
-```bash
+```zsh
 mkdir -p "$HOME/src"
 git clone https://github.com/mrjng/config.git "$HOME/src/config"
 cd "$HOME/src/config"
@@ -424,7 +447,7 @@ through PATH and does not auto-start from Zsh.
 
 Inspect every target again after cloning:
 
-```bash
+```zsh
 for target in \
   "$HOME/.config/kitty/kitty.conf" \
   "$HOME/.config/kitty/common.conf" \
@@ -445,22 +468,28 @@ Kitty, Starship, and Zsh require absent targets. For configuration worth
 keeping, create one private backup directory and move each reviewed target into
 it individually:
 
-```bash
-if [[ -e $HOME/.config || -L $HOME/.config ]]; then
-  [[ -d $HOME/.config && ! -L $HOME/.config ]]
-else
-  mkdir -- "$HOME/.config"
-fi
-backup_root=$(umask 077; mktemp -d "$HOME/.config/dotfiles-backup.XXXXXXXX")
-printf 'record this backup directory: %s\n' "$backup_root"
+```zsh
+(
+  set -euo pipefail
+  if [[ -e $HOME/.config || -L $HOME/.config ]]; then
+    [[ -d $HOME/.config && ! -L $HOME/.config ]]
+  else
+    mkdir -- "$HOME/.config"
+  fi
+  backup_root=$(umask 077; mktemp -d \
+    "$HOME/.config/dotfiles-backup.XXXXXXXX")
+  printf 'record this backup directory: %s\n' "$backup_root"
+)
 ```
 
 Example for a reviewed regular `.zshrc`:
 
-```bash
-[[ -f $HOME/.zshrc && ! -L $HOME/.zshrc ]]
-[[ ! -e $backup_root/zshrc && ! -L $backup_root/zshrc ]]
-mv -- "$HOME/.zshrc" "$backup_root/zshrc"
+```zsh
+backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+[[ -d $backup_root && ! -L $backup_root ]] &&
+  [[ -f $HOME/.zshrc && ! -L $HOME/.zshrc ]] &&
+  [[ ! -e $backup_root/zshrc && ! -L $backup_root/zshrc ]] &&
+  mv -- "$HOME/.zshrc" "$backup_root/zshrc"
 ```
 
 Use a distinct name for each target. Do not run a broad recursive move or move
@@ -490,7 +519,7 @@ complete layout:
 
 Create links only after every destination is absent:
 
-```bash
+```zsh
 (
   set -euo pipefail
   repo_dir="$HOME/src/config"
@@ -545,7 +574,7 @@ rollback in section 11 before retrying.
 
 Use only when `~/.config/zellij/config.kdl` is absent:
 
-```bash
+```zsh
 (
   set -euo pipefail
   source_file="$HOME/src/config/zellij/config.kdl"
@@ -586,7 +615,7 @@ Use only after reviewing an existing regular non-symlink config. This records
 its checksum, preserves it in a unique directory, and restores it if deployment
 validation fails:
 
-```bash
+```zsh
 (
   set -euo pipefail
   source_file="$HOME/src/config/zellij/config.kdl"
@@ -652,7 +681,7 @@ yet.
 
 Run from the repository root:
 
-```bash
+```zsh
 (
   set -euo pipefail
   cd "$HOME/src/config"
@@ -732,21 +761,47 @@ four matching font styles. Parser success is not physical proof.
 ### Fresh-login PATH and command lookup
 
 Do not inherit another shell's PATH. Use a private regular history file and
-start interactive Zsh with exactly the minimal PATH:
+start interactive Zsh with exactly the minimal PATH. From the current Zsh,
+start a temporary Bash process:
+
+```zsh
+bash
+```
+
+Paste this complete block into Bash. It waits while the nested Zsh is
+interactive, then removes its exact history file and terminates Bash:
 
 ```bash
-zsh_test_dir=$(umask 077; mktemp -d -p /tmp zsh-login-test.XXXXXXXX)
-zsh_test_history="$zsh_test_dir/history"
-touch "$zsh_test_history"
-chmod 600 "$zsh_test_history"
+(
+  zsh_test_history=$(umask 077; mktemp -p /tmp \
+    zsh-login-history.XXXXXXXX) || exit 1
 
-env -i \
-  HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" \
-  SHELL=/usr/bin/zsh TERM="${TERM:-xterm-256color}" \
-  PATH=/usr/local/bin:/usr/bin:/bin \
-  HISTFILE="$zsh_test_history" \
-  ZDOTDIR="$HOME/src/config/zsh" \
-  /usr/bin/zsh -d
+  if env -i \
+      HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" \
+      SHELL=/usr/bin/zsh TERM="${TERM:-xterm-256color}" \
+      PATH=/usr/local/bin:/usr/bin:/bin \
+      HISTFILE="$zsh_test_history" \
+      ZDOTDIR="$HOME/src/config/zsh" \
+      /usr/bin/zsh -d; then
+    zsh_login_test_status=0
+  else
+    zsh_login_test_status=$?
+  fi
+
+  case $zsh_test_history in
+    /tmp/zsh-login-history.*) ;;
+    *) exit 1 ;;
+  esac
+  [[ -f $zsh_test_history && ! -L $zsh_test_history ]] || exit 1
+  rm -- "$zsh_test_history" || exit 1
+  if (( zsh_login_test_status != 0 )); then
+    printf 'STOP: fresh-login Zsh test failed with status %d\n' \
+      "$zsh_login_test_status" >&2
+  fi
+  exit "$zsh_login_test_status"
+)
+zsh_login_test_status=$?
+exit "$zsh_login_test_status"
 ```
 
 At the new prompt:
@@ -775,16 +830,8 @@ exit
 Expected result: `~/.local/bin` appears exactly once, `~/bin` appears exactly
 once when present, Starship and Zellij resolve from `~/.local/bin`, and the
 three system PATH entries remain. Never assign lowercase `path` and never use
-`/dev/null` as an interactive HISTFILE.
-
-After exit, remove only the private test files:
-
-```bash
-[[ -f $zsh_test_history && ! -L $zsh_test_history ]]
-rm -- "$zsh_test_history"
-rmdir -- "$zsh_test_dir"
-unset zsh_test_history zsh_test_dir
-```
+`/dev/null` as an interactive HISTFILE. Exiting the nested Zsh triggers exact
+cleanup and returns through the temporary Bash to the original Zsh.
 
 ### Physical checks
 
@@ -807,7 +854,7 @@ Do not enable bell suppression until an audible and visual test selects a policy
 This is optional and comes only after automated and physical validation. Skip
 it when the account shell is already the intended Zsh.
 
-```bash
+```zsh
 (
   set -euo pipefail
   account_name=$(id -un)
@@ -832,7 +879,7 @@ Update one layer at a time and validate it before starting another.
 
 ### Fedora packages
 
-```bash
+```zsh
 dnf check-update
 sudo dnf upgrade --refresh
 ```
@@ -845,7 +892,7 @@ with artifact replacement, dotfile deployment, or a login-shell change.
 Deployed symlinks expose repository changes immediately. Require a clean
 worktree and review incoming changes before updating:
 
-```bash
+```zsh
 (
   set -euo pipefail
   cd "$HOME/src/config"
@@ -858,7 +905,7 @@ worktree and review incoming changes before updating:
 
 If acceptable:
 
-```bash
+```zsh
 (
   set -euo pipefail
   cd "$HOME/src/config"
@@ -894,7 +941,7 @@ versions, or replace a destination whose identity is unknown.
 
 Verify every target is still the exact repository symlink before unlinking:
 
-```bash
+```zsh
 (
   set -euo pipefail
   repo_dir="$HOME/src/config"
@@ -920,28 +967,30 @@ Verify every target is still the exact repository symlink before unlinking:
 ```
 
 If only some links were deployed, verify and unlink those individually. Restore
-reviewed files from the recorded `$backup_root` only into absent targets. For
+reviewed files from the recorded backup directory only into absent targets. For
 example:
 
-```bash
-[[ -f $backup_root/zshrc && ! -L $backup_root/zshrc ]]
-[[ ! -e $HOME/.zshrc && ! -L $HOME/.zshrc ]]
-mv -- "$backup_root/zshrc" "$HOME/.zshrc"
+```zsh
+backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+[[ -d $backup_root && ! -L $backup_root ]] &&
+  [[ -f $backup_root/zshrc && ! -L $backup_root/zshrc ]] &&
+  [[ ! -e $HOME/.zshrc && ! -L $HOME/.zshrc ]] &&
+  mv -- "$backup_root/zshrc" "$HOME/.zshrc"
 ```
 
 ### Zellij clean deployment
 
 Use only when no migration backup exists:
 
-```bash
+```zsh
 (
   set -euo pipefail
   config_dir="$HOME/.config/zellij"
   destination="$config_dir/config.kdl"
   source_file="$HOME/src/config/zellij/config.kdl"
-  shopt -s nullglob
-  migration_backups=("$config_dir"/repository-backup.*)
-  (( ${#migration_backups[@]} == 0 ))
+  migration_backups=$(find "$config_dir" -mindepth 1 -maxdepth 1 \
+    -name 'repository-backup.*' -print)
+  [[ -z $migration_backups ]]
   [[ -L $destination ]]
   [[ $(readlink -- "$destination") == "$source_file" ]]
   unlink "$destination"
@@ -952,20 +1001,17 @@ Any matching backup makes this refuse to unlink. Use migrated rollback instead.
 
 ### Zellij migrated deployment
 
-Set the exact directory printed during migration:
+Set the placeholder in this self-contained block to the exact directory printed
+during migration. Restore only the preserved regular file into an absent
+destination:
 
-```bash
-zellij_backup_dir="$HOME/.config/zellij/repository-backup.RECORDED_SUFFIX"
-```
-
-Restore only the preserved regular file into an absent destination:
-
-```bash
+```zsh
 (
   set -euo pipefail
   config_dir="$HOME/.config/zellij"
   destination="$config_dir/config.kdl"
   source_file="$HOME/src/config/zellij/config.kdl"
+  zellij_backup_dir="$config_dir/repository-backup.RECORDED_SUFFIX"
   backup_file="$zellij_backup_dir/config.kdl"
   [[ $(dirname -- "$zellij_backup_dir") == "$config_dir" ]]
   [[ $(basename -- "$zellij_backup_dir") == repository-backup.* ]]
@@ -990,7 +1036,7 @@ For a failed update, restore the recorded verified backup and repeat section 8.
 For complete binary removal, first ensure no Zellij session or shell depends on
 them, then verify identity before removal:
 
-```bash
+```zsh
 (
   set -euo pipefail
   starship_bin="$HOME/.local/bin/starship"
@@ -1010,7 +1056,7 @@ them, then verify identity before removal:
 Remove Meslo only when its dedicated directory contains exactly the four files
 listed in section 4, all regular non-symlink files, and no unrelated font:
 
-```bash
+```zsh
 (
   set -euo pipefail
   font_dir="$HOME/.local/share/fonts/MesloLGSNerdFontMono"
@@ -1046,10 +1092,13 @@ checking that no other software depends on them.
 Restore the exact shell recorded before `chsh`, after confirming it is listed
 in `/etc/shells`:
 
-```bash
-previous_shell=/absolute/path/recorded/before/change
-grep -Fx -- "$previous_shell" /etc/shells
-chsh -s "$previous_shell"
+```zsh
+(
+  set -euo pipefail
+  previous_shell=/absolute/path/recorded/before/change
+  grep -Fx -- "$previous_shell" /etc/shells
+  chsh -s "$previous_shell"
+)
 ```
 
 The change applies at next login. If Zsh cannot start, use a TTY or another

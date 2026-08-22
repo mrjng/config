@@ -413,17 +413,18 @@ fi
 
 ## 5. Dotfiles repository
 
-Clone into the path used below:
+Clone into any chosen absolute path. Replace the placeholder, then run all later
+repository-dependent blocks from somewhere inside that clone:
 
 ```zsh
-mkdir -p "$HOME/src"
-git clone https://github.com/mrjng/config.git "$HOME/src/config"
-cd "$HOME/src/config"
-git status --short --branch
+git clone https://github.com/mrjng/config.git /absolute/path/to/config
+cd /absolute/path/to/config
+repo=$(git rev-parse --show-toplevel) || exit
+git -C "$repo" status --short --branch
 ```
 
-If `$HOME/src/config` exists, do not clone over it. Inspect its remote, branch,
-and status; use section 10 only after unexplained changes are resolved.
+If the chosen destination exists, do not clone over it. Inspect its remote,
+branch, and status; use section 10 only after unexplained changes are resolved.
 
 Active Fedora files:
 
@@ -464,13 +465,15 @@ for target in \
 done
 ```
 
-Kitty, Starship, and Zsh require absent targets. For configuration worth
-keeping, create one private backup directory and move each reviewed target into
-it individually:
+Kitty, Starship, and Zsh require absent targets. Always create the private
+deployment-record directory and its `repository-root` metadata, even when every
+live destination is initially absent. Existing reviewed files may then be
+preserved in that directory individually:
 
 ```zsh
 (
   set -euo pipefail
+  repo=$(git rev-parse --show-toplevel) || exit
   if [[ -e $HOME/.config || -L $HOME/.config ]]; then
     [[ -d $HOME/.config && ! -L $HOME/.config ]]
   else
@@ -478,9 +481,14 @@ it individually:
   fi
   backup_root=$(umask 077; mktemp -d \
     "$HOME/.config/dotfiles-backup.XXXXXXXX")
+  printf '%s\n' "$repo" >"$backup_root/repository-root"
   printf 'record this backup directory: %s\n' "$backup_root"
 )
 ```
+
+The `repository-root` metadata records the absolute clone root used for
+deployment and rollback. Keep this clean deployment record even when it
+contains no preserved destination files.
 
 Example for a reviewed regular `.zshrc`:
 
@@ -511,25 +519,34 @@ Kitty resolves relative includes beside the deployed entry point. Deploy the
 complete layout:
 
 ```text
-~/.config/kitty/kitty.conf              -> ~/src/config/kitty/kitty.conf
-~/.config/kitty/common.conf             -> ~/src/config/kitty/common.conf
-~/.config/kitty/linux.conf              -> ~/src/config/kitty/linux.conf
-~/.config/kitty/work/current-theme.conf -> ~/src/config/kitty/work/current-theme.conf
+~/.config/kitty/kitty.conf              -> REPOSITORY_ROOT/kitty/kitty.conf
+~/.config/kitty/common.conf             -> REPOSITORY_ROOT/kitty/common.conf
+~/.config/kitty/linux.conf              -> REPOSITORY_ROOT/kitty/linux.conf
+~/.config/kitty/work/current-theme.conf -> REPOSITORY_ROOT/kitty/work/current-theme.conf
 ```
 
-Create links only after every destination is absent:
+Run from somewhere inside the clone. Paste the recorded backup directory and
+create links only after every destination is absent:
 
 ```zsh
 (
   set -euo pipefail
-  repo_dir="$HOME/src/config"
+  repo=$(git rev-parse --show-toplevel) || exit
+  current_repo=$repo
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -f "$backup_root/repository-root" && \
+    ! -L "$backup_root/repository-root" ]]
+  IFS= read -r recorded_repo <"$backup_root/repository-root"
+  [[ -n $recorded_repo && $recorded_repo == /* ]]
+  [[ $current_repo == $recorded_repo ]]
+  repo=$recorded_repo
   for source_file in \
-    "$repo_dir/kitty/kitty.conf" \
-    "$repo_dir/kitty/common.conf" \
-    "$repo_dir/kitty/linux.conf" \
-    "$repo_dir/kitty/work/current-theme.conf" \
-    "$repo_dir/starship/starship.toml" \
-    "$repo_dir/zsh/.zshrc"; do
+    "$repo/kitty/kitty.conf" \
+    "$repo/kitty/common.conf" \
+    "$repo/kitty/linux.conf" \
+    "$repo/kitty/work/current-theme.conf" \
+    "$repo/starship/starship.toml" \
+    "$repo/zsh/.zshrc"; do
     [[ -f $source_file && ! -L $source_file ]]
   done
   for destination in \
@@ -557,18 +574,25 @@ Create links only after every destination is absent:
   else
     mkdir -- "$HOME/.config/kitty/work"
   fi
-  ln -s "$repo_dir/kitty/kitty.conf" "$HOME/.config/kitty/kitty.conf"
-  ln -s "$repo_dir/kitty/common.conf" "$HOME/.config/kitty/common.conf"
-  ln -s "$repo_dir/kitty/linux.conf" "$HOME/.config/kitty/linux.conf"
-  ln -s "$repo_dir/kitty/work/current-theme.conf" \
+  ln -s "$repo/kitty/kitty.conf" "$HOME/.config/kitty/kitty.conf"
+  ln -s "$repo/kitty/common.conf" "$HOME/.config/kitty/common.conf"
+  ln -s "$repo/kitty/linux.conf" "$HOME/.config/kitty/linux.conf"
+  ln -s "$repo/kitty/work/current-theme.conf" \
     "$HOME/.config/kitty/work/current-theme.conf"
-  ln -s "$repo_dir/starship/starship.toml" "$HOME/.config/starship.toml"
-  ln -s "$repo_dir/zsh/.zshrc" "$HOME/.zshrc"
+  ln -s "$repo/starship/starship.toml" "$HOME/.config/starship.toml"
+  ln -s "$repo/zsh/.zshrc" "$HOME/.zshrc"
 )
 ```
 
-If this stops after creating some links, inspect them and use exact-link
-rollback in section 11 before retrying.
+This Fedora deployment remains sequential. If it stops after creating some
+links, the explicitly retained risk is a partial deployment; inspect the links
+and use the exact-link rollback in section 11 to recover manually before
+retrying.
+
+These links contain the absolute root recorded in backup metadata. Moving or
+renaming the clone while they are deployed breaks them; use section 11 to roll
+back links that still point to the recorded root, or redeploy from the new clone
+location.
 
 ### Zellij clean target
 
@@ -577,7 +601,16 @@ Use only when `~/.config/zellij/config.kdl` is absent:
 ```zsh
 (
   set -euo pipefail
-  source_file="$HOME/src/config/zellij/config.kdl"
+  repo=$(git rev-parse --show-toplevel) || exit
+  current_repo=$repo
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -f "$backup_root/repository-root" && \
+    ! -L "$backup_root/repository-root" ]]
+  IFS= read -r recorded_repo <"$backup_root/repository-root"
+  [[ -n $recorded_repo && $recorded_repo == /* ]]
+  [[ $current_repo == $recorded_repo ]]
+  repo=$recorded_repo
+  source_file="$repo/zellij/config.kdl"
   config_root="$HOME/.config"
   config_dir="$config_root/zellij"
   destination="$config_dir/config.kdl"
@@ -618,7 +651,16 @@ validation fails:
 ```zsh
 (
   set -euo pipefail
-  source_file="$HOME/src/config/zellij/config.kdl"
+  repo=$(git rev-parse --show-toplevel) || exit
+  current_repo=$repo
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -f "$backup_root/repository-root" && \
+    ! -L "$backup_root/repository-root" ]]
+  IFS= read -r recorded_repo <"$backup_root/repository-root"
+  [[ -n $recorded_repo && $recorded_repo == /* ]]
+  [[ $current_repo == $recorded_repo ]]
+  repo=$recorded_repo
+  source_file="$repo/zellij/config.kdl"
   config_dir="$HOME/.config/zellij"
   destination="$config_dir/config.kdl"
   zellij_bin="$HOME/.local/bin/zellij"
@@ -679,13 +721,20 @@ yet.
 
 ### Repository and deployed configuration
 
-Run from the repository root:
+Run from somewhere inside the clone and paste the recorded backup directory:
 
 ```zsh
 (
   set -euo pipefail
-  cd "$HOME/src/config"
-  repo_dir="$PWD"
+  repo=$(git rev-parse --show-toplevel) || exit
+  current_repo=$repo
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -f "$backup_root/repository-root" && \
+    ! -L "$backup_root/repository-root" ]]
+  IFS= read -r recorded_repo <"$backup_root/repository-root"
+  [[ -n $recorded_repo && $recorded_repo == /* ]]
+  [[ $current_repo == $recorded_repo ]]
+  repo=$recorded_repo
   starship_bin="$HOME/.local/bin/starship"
   zellij_bin="$HOME/.local/bin/zellij"
 
@@ -699,18 +748,18 @@ Run from the repository root:
     "$zellij_bin" | sha256sum --check --strict
 
   [[ $(readlink "$HOME/.config/kitty/kitty.conf") == \
-    "$repo_dir/kitty/kitty.conf" ]]
+    "$repo/kitty/kitty.conf" ]]
   [[ $(readlink "$HOME/.config/kitty/common.conf") == \
-    "$repo_dir/kitty/common.conf" ]]
+    "$repo/kitty/common.conf" ]]
   [[ $(readlink "$HOME/.config/kitty/linux.conf") == \
-    "$repo_dir/kitty/linux.conf" ]]
+    "$repo/kitty/linux.conf" ]]
   [[ $(readlink "$HOME/.config/kitty/work/current-theme.conf") == \
-    "$repo_dir/kitty/work/current-theme.conf" ]]
+    "$repo/kitty/work/current-theme.conf" ]]
   [[ $(readlink "$HOME/.config/starship.toml") == \
-    "$repo_dir/starship/starship.toml" ]]
-  [[ $(readlink "$HOME/.zshrc") == "$repo_dir/zsh/.zshrc" ]]
+    "$repo/starship/starship.toml" ]]
+  [[ $(readlink "$HOME/.zshrc") == "$repo/zsh/.zshrc" ]]
   [[ $(readlink "$HOME/.config/zellij/config.kdl") == \
-    "$repo_dir/zellij/config.kdl" ]]
+    "$repo/zellij/config.kdl" ]]
 
   STARSHIP_CONFIG="$HOME/.config/starship.toml" \
     "$starship_bin" print-config >/dev/null
@@ -719,7 +768,7 @@ Run from the repository root:
 
   zsh_file_list=$(mktemp -p /tmp zsh-validation.XXXXXXXX)
   trap 'rm -f -- "$zsh_file_list"' EXIT
-  find zsh -type f -print0 | sort -z > "$zsh_file_list"
+  find "$repo/zsh" -type f -print0 | sort -z > "$zsh_file_list"
   [[ -s $zsh_file_list ]]
   while IFS= read -r -d '' zsh_file; do
     zsh -n "$zsh_file"
@@ -773,6 +822,7 @@ interactive, then removes its exact history file and terminates Bash:
 
 ```bash
 (
+  repo=$(git rev-parse --show-toplevel) || exit
   zsh_test_history=$(umask 077; mktemp -p /tmp \
     zsh-login-history.XXXXXXXX) || exit 1
 
@@ -781,7 +831,7 @@ interactive, then removes its exact history file and terminates Bash:
       SHELL=/usr/bin/zsh TERM="${TERM:-xterm-256color}" \
       PATH=/usr/local/bin:/usr/bin:/bin \
       HISTFILE="$zsh_test_history" \
-      ZDOTDIR="$HOME/src/config/zsh" \
+      ZDOTDIR="$repo/zsh" \
       /usr/bin/zsh -d; then
     zsh_login_test_status=0
   else
@@ -895,11 +945,11 @@ worktree and review incoming changes before updating:
 ```zsh
 (
   set -euo pipefail
-  cd "$HOME/src/config"
-  [[ -z $(git status --short) ]]
-  git fetch origin
-  git log --oneline --decorate HEAD..@{upstream}
-  git diff --stat HEAD..@{upstream}
+  repo=$(git rev-parse --show-toplevel) || exit
+  [[ -z $(git -C "$repo" status --short) ]]
+  git -C "$repo" fetch origin
+  git -C "$repo" log --oneline --decorate HEAD..@{upstream}
+  git -C "$repo" diff --stat HEAD..@{upstream}
 )
 ```
 
@@ -908,9 +958,9 @@ If acceptable:
 ```zsh
 (
   set -euo pipefail
-  cd "$HOME/src/config"
-  [[ -z $(git status --short) ]]
-  git merge --ff-only '@{upstream}'
+  repo=$(git rev-parse --show-toplevel) || exit
+  [[ -z $(git -C "$repo" status --short) ]]
+  git -C "$repo" merge --ff-only '@{upstream}'
 )
 ```
 
@@ -939,23 +989,32 @@ versions, or replace a destination whose identity is unknown.
 
 ### Configuration links
 
-Verify every target is still the exact repository symlink before unlinking:
+Verify every target is still the exact repository symlink before unlinking.
+This block needs neither Git nor a live clone, can run from any directory, and
+reads the absolute repository root solely from the selected deployment record:
 
 ```zsh
 (
   set -euo pipefail
-  repo_dir="$HOME/src/config"
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -d $backup_root && ! -L $backup_root ]]
+  repository_root_file="$backup_root/repository-root"
+  [[ -f $repository_root_file && ! -L $repository_root_file ]]
+  IFS= read -r repo <"$repository_root_file"
+  [[ -n $repo && $repo == /* ]]
+  metadata_lines=$(wc -l <"$repository_root_file")
+  (( metadata_lines == 1 ))
   [[ $(readlink "$HOME/.config/kitty/kitty.conf") == \
-    "$repo_dir/kitty/kitty.conf" ]]
+    "$repo/kitty/kitty.conf" ]]
   [[ $(readlink "$HOME/.config/kitty/common.conf") == \
-    "$repo_dir/kitty/common.conf" ]]
+    "$repo/kitty/common.conf" ]]
   [[ $(readlink "$HOME/.config/kitty/linux.conf") == \
-    "$repo_dir/kitty/linux.conf" ]]
+    "$repo/kitty/linux.conf" ]]
   [[ $(readlink "$HOME/.config/kitty/work/current-theme.conf") == \
-    "$repo_dir/kitty/work/current-theme.conf" ]]
+    "$repo/kitty/work/current-theme.conf" ]]
   [[ $(readlink "$HOME/.config/starship.toml") == \
-    "$repo_dir/starship/starship.toml" ]]
-  [[ $(readlink "$HOME/.zshrc") == "$repo_dir/zsh/.zshrc" ]]
+    "$repo/starship/starship.toml" ]]
+  [[ $(readlink "$HOME/.zshrc") == "$repo/zsh/.zshrc" ]]
 
   unlink "$HOME/.zshrc"
   unlink "$HOME/.config/starship.toml"
@@ -967,27 +1026,45 @@ Verify every target is still the exact repository symlink before unlinking:
 ```
 
 If only some links were deployed, verify and unlink those individually. Restore
-reviewed files from the recorded backup directory only into absent targets. For
-example:
-
-```zsh
-backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
-[[ -d $backup_root && ! -L $backup_root ]] &&
-  [[ -f $backup_root/zshrc && ! -L $backup_root/zshrc ]] &&
-  [[ ! -e $HOME/.zshrc && ! -L $HOME/.zshrc ]] &&
-  mv -- "$backup_root/zshrc" "$HOME/.zshrc"
-```
-
-### Zellij clean deployment
-
-Use only when no migration backup exists:
+reviewed files from the recorded backup directory only into absent targets.
+This example validates the deployment record and needs no live clone:
 
 ```zsh
 (
   set -euo pipefail
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -d $backup_root && ! -L $backup_root ]]
+  repository_root_file="$backup_root/repository-root"
+  [[ -f $repository_root_file && ! -L $repository_root_file ]]
+  IFS= read -r repo <"$repository_root_file"
+  [[ -n $repo && $repo == /* ]]
+  metadata_lines=$(wc -l <"$repository_root_file")
+  (( metadata_lines == 1 ))
+  [[ -f $backup_root/zshrc && ! -L $backup_root/zshrc ]]
+  [[ ! -e $HOME/.zshrc && ! -L $HOME/.zshrc ]]
+  mv -- "$backup_root/zshrc" "$HOME/.zshrc"
+)
+```
+
+### Zellij clean deployment
+
+Use only when no migration backup exists. It needs no live clone and reads the
+absolute repository root solely from the selected deployment record:
+
+```zsh
+(
+  set -euo pipefail
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -d $backup_root && ! -L $backup_root ]]
+  repository_root_file="$backup_root/repository-root"
+  [[ -f $repository_root_file && ! -L $repository_root_file ]]
+  IFS= read -r repo <"$repository_root_file"
+  [[ -n $repo && $repo == /* ]]
+  metadata_lines=$(wc -l <"$repository_root_file")
+  (( metadata_lines == 1 ))
   config_dir="$HOME/.config/zellij"
   destination="$config_dir/config.kdl"
-  source_file="$HOME/src/config/zellij/config.kdl"
+  source_file="$repo/zellij/config.kdl"
   migration_backups=$(find "$config_dir" -mindepth 1 -maxdepth 1 \
     -name 'repository-backup.*' -print)
   [[ -z $migration_backups ]]
@@ -1001,16 +1078,25 @@ Any matching backup makes this refuse to unlink. Use migrated rollback instead.
 
 ### Zellij migrated deployment
 
-Set the placeholder in this self-contained block to the exact directory printed
-during migration. Restore only the preserved regular file into an absent
-destination:
+Set the placeholders in this self-contained block to the exact directories
+printed during backup and migration. It needs no live clone and reads the
+absolute repository root solely from the selected deployment record. Restore
+only the preserved regular file into an absent destination:
 
 ```zsh
 (
   set -euo pipefail
+  backup_root="$HOME/.config/dotfiles-backup.RECORDED_SUFFIX"
+  [[ -d $backup_root && ! -L $backup_root ]]
+  repository_root_file="$backup_root/repository-root"
+  [[ -f $repository_root_file && ! -L $repository_root_file ]]
+  IFS= read -r repo <"$repository_root_file"
+  [[ -n $repo && $repo == /* ]]
+  metadata_lines=$(wc -l <"$repository_root_file")
+  (( metadata_lines == 1 ))
   config_dir="$HOME/.config/zellij"
   destination="$config_dir/config.kdl"
-  source_file="$HOME/src/config/zellij/config.kdl"
+  source_file="$repo/zellij/config.kdl"
   zellij_backup_dir="$config_dir/repository-backup.RECORDED_SUFFIX"
   backup_file="$zellij_backup_dir/config.kdl"
   [[ $(dirname -- "$zellij_backup_dir") == "$config_dir" ]]

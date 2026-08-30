@@ -1,6 +1,6 @@
 # Fedora Asahi Terminal Environment Reproduction Guide
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 Run commands in order and one block at a time. Read each expected result and
 stop condition before continuing. This repository does not install packages,
@@ -442,7 +442,18 @@ zellij/config.kdl
 `zsh/.zshrc` adds `~/.local/bin` before integrations and adds `~/bin` only
 when it exists. It preserves PATH entries, avoids duplicates, and never assigns
 to Zsh's special lowercase `path`. Zellij resolves `default_shell "zsh"`
-through PATH and does not auto-start from Zsh.
+through PATH and does not auto-start from Zsh. Readable Fedora
+`zsh-autosuggestions` and `zsh-syntax-highlighting` scripts are loaded without
+sourcing Oh My Zsh; a missing optional script does not prevent shell startup,
+although it fails the package validation for the documented full profile.
+
+The shared prompt hook clears only stale mouse modes 1000, 1002, 1003, 1005,
+1006, 1007, 1015, and 1016, focus mode 1004, and restores cursor visibility
+with mode 25. This repairs escape sequences left behind when a remote SSH or
+Zellij application exits abnormally. It deliberately emits nothing when
+`ZELLIJ` is set, because the local Zellij session owns terminal mouse handling;
+it does not call `reset` or alter bracketed paste, cursor shape, colors, or
+other state.
 
 ## 6. Existing-target inspection and preservation
 
@@ -805,7 +816,10 @@ if str(opts.linux_display_server) != "wayland":
 
 Expected results are two checksum `OK` messages, successful Starship and
 Zellij parsing, no Zsh syntax failure, Kitty `bad_lines=0`, Wayland, Meslo, and
-four matching font styles. Parser success is not physical proof.
+four matching font styles. The standalone autosuggestions and syntax-
+highlighting package files must be readable. Their guarded absence is safe for
+shell startup but means the intended interactive features are unavailable.
+Parser success is not physical proof.
 
 ### Fresh-login PATH and command lookup
 
@@ -889,6 +903,11 @@ In a new Kitty window, verify:
 
 - Regular, bold, italic, and bold-italic text use the intended Meslo faces.
 - Starship and Zellij glyphs are aligned and not clipped.
+- Autosuggestions appear and accept with Right Arrow, `Ctrl+F`, and `Ctrl+E`.
+- Syntax highlighting remains active after Starship initializes.
+- After interrupting a disposable remote terminal application that enabled
+  mouse reporting, the next prompt recovers normal mouse selection; a local
+  Zellij pane retains its own mouse handling.
 - `Ctrl+Space` switches Hangul in plain Zsh and a Zellij pane.
 - `Ctrl+Shift+C/V` copy and paste outside and inside Zellij; use disposable text.
 - A visible URL is detected and opens with the expected desktop handler.

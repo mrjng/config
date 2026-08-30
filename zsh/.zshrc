@@ -30,7 +30,6 @@ source "$_dotfiles_zsh_root/conf.d/development.zsh"
 source "$_dotfiles_zsh_root/conf.d/history.zsh"
 source "$_dotfiles_zsh_root/conf.d/completion.zsh"
 source "$_dotfiles_zsh_root/conf.d/interactive.zsh"
-source "$_dotfiles_zsh_root/conf.d/aliases.zsh"
 
 if [[ -z ${ZSH_EXECUTION_STRING-} ]]; then
   if [[ -r $_dotfiles_fzf_key_bindings_source ]]; then
@@ -55,6 +54,9 @@ fi
 # Syntax highlighting must be sourced after widgets, bindings, and prompt setup.
 [[ -r $_dotfiles_syntax_highlighting_source ]] &&
   source "$_dotfiles_syntax_highlighting_source"
+
+# Define personal aliases after integrations so they cannot alter sourced code.
+source "$_dotfiles_zsh_root/conf.d/aliases.zsh"
 
 unset _dotfiles_autosuggestions_source
 unset _dotfiles_syntax_highlighting_source

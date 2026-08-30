@@ -13,6 +13,11 @@ if (( $+commands[nvim] )); then
   alias vim='nvim'
 fi
 
+if (( $+commands[bat] )); then
+  export BAT_THEME='Monokai Extended'
+  alias cat='bat'
+fi
+
 if (( $+commands[kitty] )); then
   alias kssh='kitty +kitten ssh'
 fi

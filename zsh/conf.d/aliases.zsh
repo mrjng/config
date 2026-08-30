@@ -21,3 +21,14 @@ fi
 if (( $+commands[kitty] )); then
   alias kssh='kitty +kitten ssh'
 fi
+
+# Search recursively with GNU grep when installed, falling back to system grep.
+xgrep() {
+  if (( $# != 1 )); then
+    print -u2 'usage: xgrep PATTERN'
+    return 2
+  fi
+
+  local grep_command=${commands[ggrep]:-${commands[grep]}}
+  "$grep_command" -n -r --color=auto -- "$1" .
+}

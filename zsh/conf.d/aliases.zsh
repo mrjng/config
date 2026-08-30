@@ -8,6 +8,11 @@ if (( $+commands[eza] )); then
   alias lt3='eza -aT -L3 --group-directories-first'
 fi
 
+if (( $+commands[nvim] )); then
+  alias vi='nvim'
+  alias vim='nvim'
+fi
+
 if (( $+commands[kitty] )); then
   alias kssh='kitty +kitten ssh'
 fi

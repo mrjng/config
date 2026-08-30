@@ -32,8 +32,13 @@ source "$_dotfiles_zsh_root/conf.d/completion.zsh"
 source "$_dotfiles_zsh_root/conf.d/interactive.zsh"
 source "$_dotfiles_zsh_root/conf.d/aliases.zsh"
 
-[[ -r $_dotfiles_fzf_key_bindings_source ]] &&
-  source "$_dotfiles_fzf_key_bindings_source"
+if [[ -z ${ZSH_EXECUTION_STRING-} ]]; then
+  if [[ -r $_dotfiles_fzf_key_bindings_source ]]; then
+    source "$_dotfiles_fzf_key_bindings_source"
+  elif (( $+commands[fzf] )); then
+    eval "$(fzf --zsh)"
+  fi
+fi
 
 [[ -r $_dotfiles_autosuggestions_source ]] &&
   source "$_dotfiles_autosuggestions_source"

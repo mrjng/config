@@ -18,6 +18,12 @@ Bold, Italic, and Bold Italic faces before deployment.
 - Zellij retains its default keymap and is started explicitly, never by Zsh.
 - Oh My Zsh, Powerlevel10k, `~/.p10k.zsh`, and their installation directories
   are preserved but are not sourced by the new profile.
+- The standalone Homebrew autosuggestions and syntax-highlighting scripts are
+  reused when readable; their absence never prevents Zsh from starting.
+- Neovim becomes `EDITOR` and `VISUAL` when it is available. Git continues to
+  use its existing `core.editor`; this profile does not set `GIT_EDITOR`.
+- A prompt hook recovers narrowly scoped terminal mouse and focus modes outside
+  Zellij. It never calls the broad `reset` command.
 - `kitty/work/**`, `zsh/work/**`, and `kitty/kitty.macos.conf` remain unchanged
   legacy references.
 
@@ -47,6 +53,11 @@ sw_vers
 /Applications/kitty.app/Contents/MacOS/kitty --version
 "$HOME/.cargo/bin/zellij" --version
 command -v starship || true
+/opt/homebrew/bin/brew list --versions zsh-autosuggestions || true
+/opt/homebrew/bin/brew list --versions zsh-syntax-highlighting || true
+test -r /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh || true
+test -r /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh || true
+NVIM_LOG_FILE=/dev/null command nvim --version | sed -n '1p'
 ```
 
 Expected architecture is `arm64`, Homebrew prefix is `/opt/homebrew`, and
@@ -92,6 +103,12 @@ print(f"bad_lines={len(bad_lines)}")
 print(f"font_family={opts.font_family}")
 print(f"font_size={opts.font_size}")
 print(f"macos_option_as_alt={opts.macos_option_as_alt}")
+print(f"background={opts.background.as_sharp}")
+print(f"background_opacity={opts.background_opacity}")
+print(f"background_blur={opts.background_blur}")
+print(f"background_image={opts.background_image}")
+print(f"background_image_layout={opts.background_image_layout}")
+print(f"background_tint={opts.background_tint}")
 for bad_line in bad_lines:
     print(f"bad_line={bad_line}")
 if bad_lines:
@@ -102,14 +119,24 @@ if opts.font_size != 14.0:
     raise SystemExit(1)
 if opts.macos_option_as_alt != 2:  # left
     raise SystemExit(1)
+if opts.background.as_sharp != "#191919":
+    raise SystemExit(1)
+if opts.background_opacity != 0.8 or opts.background_blur != 0:
+    raise SystemExit(1)
+if opts.background_image is not None:
+    raise SystemExit(1)
+if opts.background_image_layout != "scaled" or opts.background_tint != 0.95:
+    raise SystemExit(1)
 '
 ```
 
 The expected result is zero bad lines, family `MesloLGS NF`, size `14.0`, and
-`macos_option_as_alt=2`, Kitty's value for `left`. Parsing proves configuration
-syntax and values, not font availability or rendering. Reproduce the deployed
-Kitty topology in a disposable directory and prove that the entry point finds
-the shared, macOS, and theme includes through their deployed sibling links:
+`macos_option_as_alt=2`, Kitty's value for `left`. It also proves the portable
+background color, opacity, blur, layout, and tint while the optional image is
+absent without a warning. Parsing proves configuration syntax and values, not
+font availability or rendering. Reproduce the deployed Kitty topology in a
+disposable directory and prove that the entry point finds the shared, macOS,
+and theme includes through their deployed sibling links:
 
 ```zsh
 (
@@ -161,6 +188,12 @@ if opts.inactive_text_alpha != 0.9:
     raise SystemExit(1)
 if opts.background.as_sharp != "#191919":
     raise SystemExit(1)
+if opts.background_opacity != 0.8 or opts.background_blur != 0:
+    raise SystemExit(1)
+if opts.background_image is not None:
+    raise SystemExit(1)
+if opts.background_image_layout != "scaled" or opts.background_tint != 0.95:
+    raise SystemExit(1)
 '
 )
 ```
@@ -211,18 +244,43 @@ ZELLIJ_CONFIG_FILE="$repo/zellij/config.kdl" \
 
 Do not install or deploy if any repository check fails.
 
-## 4. Install the missing executable only after approval
+## 4. Install missing Homebrew formulae only after approval
 
 Kitty and Zellij are present on the initial target. If Section 2 confirms all
-four font faces, no font installation is needed. Install only Starship:
+four font faces, no font installation is needed. Inspect each formula first,
+then install only the missing names. This example builds that exact list and
+suppresses automatic update and post-install cleanup for the scoped operation:
 
 ```zsh
-/opt/homebrew/bin/brew install starship
-/opt/homebrew/bin/starship --version
+typeset -a missing_formulae
+for formula in starship zsh-autosuggestions zsh-syntax-highlighting; do
+  /opt/homebrew/bin/brew list --versions "$formula" >/dev/null 2>&1 ||
+    missing_formulae+=("$formula")
+done
+if (( ${#missing_formulae} )); then
+  HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+    /opt/homebrew/bin/brew install "${missing_formulae[@]}"
+fi
+
+/opt/homebrew/bin/brew list --versions \
+  starship zsh-autosuggestions zsh-syntax-highlighting
+for plugin_file in \
+  /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh \
+  /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh; do
+  [[ -r $plugin_file && -f $plugin_file ]]
+  resolved_plugin_file=${plugin_file:A}
+  [[ -f $resolved_plugin_file && ! -L $resolved_plugin_file ]]
+done
+unset formula missing_formulae plugin_file resolved_plugin_file
 ```
 
-The Homebrew formula name is `starship`. Re-check it before reproducing this
-step much later because package versions change.
+These are standalone scripts; `oh-my-zsh.sh` remains unsourced and the
+preserved Oh My Zsh plugin checkouts are neither updated nor used. The two
+plugins are optional integrations in the shell configuration, so a machine
+without them still receives a usable prompt. Installing the packages is the
+reproducible fresh-machine path; reusing an existing readable installation is
+not an installation step. Re-check formula names and versions before
+reproducing this step much later because package versions change.
 
 ## 5. Preserve the live configuration before deployment
 
@@ -279,6 +337,8 @@ symlink or other file type rather than guessing how to preserve it:
   record_destination "$HOME/.config/kitty/macos.conf" kitty-macos.conf
   record_destination "$HOME/.config/kitty/work/current-theme.conf" \
     kitty-current-theme.conf
+  record_destination "$HOME/.config/kitty/macos.local.conf" \
+    kitty-macos-local.conf
   record_destination "$HOME/.config/zellij/config.kdl" zellij-config.kdl
   record_destination "$HOME/.config/starship.toml" starship.toml
 
@@ -424,6 +484,107 @@ root. Moving or renaming the clone while they are deployed breaks the links;
 use rollback with the recorded metadata or redeploy them from the new clone
 location.
 
+### Create an optional host-local Kitty wallpaper file
+
+`macos.local.conf` is a private regular file beside the deployed Kitty links,
+not another repository symlink. The tracked configuration contains only the
+portable opacity, layout, and tint. Run this block from somewhere inside the
+clone after replacing `wallpaper` with an absolute path. It refuses an existing
+file, directory, or symlink, requires the selected backup to say the destination
+was absent, and publishes the one-line file atomically:
+
+```zsh
+(
+  set -euo pipefail
+  repo=$(git rev-parse --show-toplevel) || exit
+  current_repo=$repo
+  backup_root=/paste/the/printed/backup/path
+  wallpaper=/absolute/path/to/personal-wallpaper.jpg
+  destination="$HOME/.config/kitty/macos.local.conf"
+  config_dir=${destination:h}
+  deployed_record="$backup_root/kitty-macos-local.conf.deployed"
+  [[ -d $backup_root && ! -L $backup_root ]]
+  [[ -f $backup_root/repository-root && ! -L $backup_root/repository-root ]]
+  IFS= read -r recorded_repo <"$backup_root/repository-root"
+  [[ -n $recorded_repo && $recorded_repo == /* ]]
+  [[ $current_repo == $recorded_repo ]]
+  [[ -f $backup_root/kitty-macos-local.conf.was-absent ]]
+  [[ ! -e $backup_root/kitty-macos-local.conf.was-present ]]
+  [[ ! -e $deployed_record && ! -L $deployed_record ]]
+  [[ $wallpaper == /* && -f $wallpaper && ! -L $wallpaper ]]
+  [[ -d $config_dir && ! -L $config_dir ]]
+  [[ ! -e $destination && ! -L $destination ]]
+
+  umask 077
+  integer deployed_record_created=0
+  temporary_file=$(mktemp "$config_dir/.macos.local.conf.XXXXXXXX")
+  cleanup_local_file() {
+    operation_status=$?
+    trap - EXIT INT TERM HUP
+    case $temporary_file in
+      "$config_dir"/.macos.local.conf.*)
+        [[ ! -e $temporary_file && ! -L $temporary_file ]] ||
+          rm -f -- "$temporary_file"
+        ;;
+      *) print -u2 -- "refusing cleanup outside Kitty config: $temporary_file" ;;
+    esac
+    if (( deployed_record_created )) &&
+      [[ ! -e $destination && ! -L $destination ]]; then
+      rm -f -- "$deployed_record"
+    fi
+    exit "$operation_status"
+  }
+  trap cleanup_local_file EXIT INT TERM HUP
+  print -r -- "background_image $wallpaper" >"$temporary_file"
+  [[ -f $temporary_file && ! -L $temporary_file ]]
+  [[ $(stat -f '%Lp' "$temporary_file") == 600 ]]
+  cp -p -- "$temporary_file" "$deployed_record"
+  deployed_record_created=1
+  [[ -f $deployed_record && ! -L $deployed_record ]]
+  cmp -s -- "$temporary_file" "$deployed_record"
+  [[ ! -e $destination && ! -L $destination ]]
+  mv -- "$temporary_file" "$destination"
+  trap - EXIT INT TERM HUP
+)
+```
+
+If the backup records `was-present`, retain the existing local file instead of
+running this block. A missing local file is valid: `globinclude` then matches
+nothing and Kitty must still parse without a warning. The local file remains in
+place if the clone moves, although the absolute repository symlinks break and
+must be rolled back or redeployed.
+
+Validate the deployed topology and local image without opening Kitty. Run from
+somewhere inside the clone; any bad line or warning is a failure:
+
+```zsh
+repo=$(git rev-parse --show-toplevel) || exit
+kitty_bin=/Applications/kitty.app/Contents/MacOS/kitty
+KITTY_CONFIG_DIRECTORY="$HOME/.config/kitty" "$kitty_bin" +runpy '
+import os
+from kitty.config import load_config
+
+config_path = os.path.join(os.environ["KITTY_CONFIG_DIRECTORY"], "kitty.conf")
+bad_lines = []
+opts = load_config(config_path, accumulate_bad_lines=bad_lines)
+for bad_line in bad_lines:
+    print(f"bad_line={bad_line}")
+if bad_lines:
+    raise SystemExit(1)
+if opts.background.as_sharp != "#191919":
+    raise SystemExit(1)
+if opts.background_opacity != 0.8 or opts.background_blur != 0:
+    raise SystemExit(1)
+if not opts.background_image or not os.path.isfile(opts.background_image):
+    raise SystemExit(1)
+if opts.background_image_layout != "scaled" or opts.background_tint != 0.95:
+    raise SystemExit(1)
+if str(opts.font_family) != "MesloLGS NF" or opts.macos_option_as_alt != 2:
+    raise SystemExit(1)
+print(f"background_image={opts.background_image}")
+'
+```
+
 ## 7. Validate the deployed shell and applications
 
 Start a fresh interactive Zsh without replacing the current process:
@@ -434,14 +595,36 @@ Start a fresh interactive Zsh without replacing the current process:
   print -r -- "starship=${commands[starship]-missing}"
   print -r -- "zellij=${commands[zellij]-missing}"
   print -r -- "ZELLIJ=${ZELLIJ-unset}"
+  print -r -- "EDITOR=${EDITOR-unset}"
+  print -r -- "VISUAL=${VISUAL-unset}"
+  print -r -- "GIT_EDITOR=${GIT_EDITOR-unset}"
+  print -r -- "git_editor=$(git var GIT_EDITOR)"
+  (( $+functions[_zsh_autosuggest_start] ))
+  (( $+functions[_zsh_highlight] ))
 '
 ```
 
 `starship` should resolve below `/opt/homebrew`, `zellij` below
 `~/.cargo/bin`, and `ZELLIJ` should remain unset outside an explicitly started
-session. Open a new Kitty window and verify:
+session. `EDITOR` and `VISUAL` must be `nvim`, `GIT_EDITOR` must remain unset,
+and `git var GIT_EDITOR` must print `nvim`. Zellij consequently receives
+`EDITOR=nvim` without a keymap change. Autosuggestions load after any configured
+fzf widgets; zoxide and Starship initialize next; syntax highlighting loads
+last.
+
+The shared `precmd` hook sends only DEC private-mode resets for mouse tracking
+1000, 1002, 1003, 1005, 1006, 1007, 1015, and 1016, focus reporting 1004, then
+shows the cursor with mode 25. This repairs stale escape-sequence handling after
+an interrupted remote SSH or Zellij application. It intentionally emits
+nothing when `ZELLIJ` is set because the local Zellij session owns mouse input.
+It does not reset bracketed paste, cursor shape, colors, or unrelated state.
+
+Open a new Kitty window and verify:
 
 - prompt glyphs render correctly in regular, bold, italic, and bold italic;
+- the personal wallpaper, opacity, scale, and tint match the intended host;
+- autosuggestions appear and accept with Right Arrow, `Ctrl+F`, and `Ctrl+E`;
+- syntax coloring remains active after Starship initializes;
 - `Cmd+C/V`, `Cmd+T/W`, and `Shift+Cmd+[/]` remain Kitty actions;
 - `Ctrl+Space`, `Ctrl+Option+Space`, and `Ctrl+Arrow` remain macOS actions;
 - left Option sends Alt combinations while right Option enters macOS characters;
@@ -501,6 +684,25 @@ The operation is resumable if interrupted:
     starship.toml
   )
 
+  local_destination="$HOME/.config/kitty/macos.local.conf"
+  local_present_marker="$backup_root/kitty-macos-local.conf.was-present"
+  local_absent_marker="$backup_root/kitty-macos-local.conf.was-absent"
+  if [[ -f $local_present_marker && ! -e $local_absent_marker ]]; then
+    [[ -f $local_destination && ! -L $local_destination ]]
+    [[ -f $backup_root/kitty-macos-local.conf &&
+      ! -L $backup_root/kitty-macos-local.conf ]]
+    cmp -s -- "$local_destination" "$backup_root/kitty-macos-local.conf"
+  elif [[ -f $local_absent_marker && ! -e $local_present_marker ]]; then
+    if [[ -e $local_destination || -L $local_destination ]]; then
+      [[ -f $local_destination && ! -L $local_destination ]]
+      local_deployed_record="$backup_root/kitty-macos-local.conf.deployed"
+      [[ -f $local_deployed_record && ! -L $local_deployed_record ]]
+      cmp -s -- "$local_destination" "$local_deployed_record"
+    fi
+  else
+    exit 1
+  fi
+
   integer index
   for (( index = 1; index <= ${#sources}; index++ )); do
     source_path=${sources[index]}
@@ -539,7 +741,46 @@ The operation is resumable if interrupted:
       mv -- "$displaced" "$destination"
     fi
   done
+
+  if [[ -f $local_absent_marker &&
+    ( -e $local_destination || -L $local_destination ) ]]; then
+    rm -- "$local_destination"
+  fi
 )
 ```
 
 Open a new shell to reactivate the restored Oh My Zsh and Powerlevel10k setup.
+The host-local wallpaper file is preserved unchanged when it existed before
+deployment and is removed when this deployment created it from an absent
+destination and it still matches the recorded deployed content. The existing
+backup directory and its metadata are retained.
+
+A deployment record created by an older guide may have neither local-file
+marker. The rollback above intentionally refuses to infer prior state in that
+case. After rolling back the repository links with the guide version associated
+with that record, remove a later host-local wallpaper only when its provenance
+and exact content are independently known. This self-contained check needs no
+live clone and validates the recorded absolute root without dereferencing it:
+
+```zsh
+(
+  set -euo pipefail
+  backup_root=/paste/the/printed/backup/path
+  expected_wallpaper=/absolute/path/to/personal-wallpaper.jpg
+  destination="$HOME/.config/kitty/macos.local.conf"
+  repository_root_file="$backup_root/repository-root"
+  [[ -d $backup_root && ! -L $backup_root ]]
+  [[ -f $repository_root_file && ! -L $repository_root_file ]]
+  IFS= read -r recorded_repo <"$repository_root_file"
+  [[ -n $recorded_repo && $recorded_repo == /* ]]
+  metadata_lines=$(wc -l <"$repository_root_file")
+  (( metadata_lines == 1 ))
+  [[ $expected_wallpaper == /* ]]
+  [[ -f $destination && ! -L $destination ]]
+  local_lines=$(wc -l <"$destination")
+  (( local_lines == 1 ))
+  IFS= read -r local_setting <"$destination"
+  [[ $local_setting == "background_image $expected_wallpaper" ]]
+  rm -- "$destination"
+)
+```

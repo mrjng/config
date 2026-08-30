@@ -26,6 +26,7 @@ case $OSTYPE in
     ;;
 esac
 
+source "$_dotfiles_zsh_root/conf.d/development.zsh"
 source "$_dotfiles_zsh_root/conf.d/history.zsh"
 source "$_dotfiles_zsh_root/conf.d/completion.zsh"
 source "$_dotfiles_zsh_root/conf.d/interactive.zsh"

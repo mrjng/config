@@ -22,6 +22,11 @@ if (( $+commands[kitty] )); then
   alias kssh='kitty +kitten ssh'
 fi
 
+if (( $+commands[nvim] )); then
+  alias vi='nvim'
+  alias vim='nvim'
+fi
+
 # Search recursively with GNU grep when installed, falling back to system grep.
 xgrep() {
   if (( $# != 1 )); then

@@ -1,5 +1,18 @@
 # Use predictable Emacs-style line editing without claiming Fcitx5's Ctrl+Space.
 bindkey -e
+
+# Search history entries by the text already typed at the prompt.
+autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
+zle -N up-line-or-beginning-search
+zle -N down-line-or-beginning-search
+bindkey '^[[A' up-line-or-beginning-search
+bindkey '^[[B' down-line-or-beginning-search
+bindkey '^[OA' up-line-or-beginning-search
+bindkey '^[OB' down-line-or-beginning-search
+
+# Interpret Kitty's Option/Alt-arrow escape sequences as word navigation.
+bindkey '^[[1;3D' backward-word
+bindkey '^[[1;3C' forward-word
 setopt INTERACTIVE_COMMENTS
 
 # Recover from mouse and focus reporting left enabled by an interrupted remote
